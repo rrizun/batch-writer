@@ -16,4 +16,4 @@ dependencies {
 
 }
 
-mainClassName = "TryMain"
+mainClassName = "dlcm.Main"

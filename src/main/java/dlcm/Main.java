@@ -81,6 +81,7 @@ public class Main {
 
       // log("batchWriteItem", fromIndex, toIndex);
       pool.execute(() -> {
+        DynamoDbClient dynamo = DynamoDbClient.create();
         BatchWriteItemResponse batchWriteItemResponse = dynamo.batchWriteItem(batchWriteItemRequest);
         Double consumedCapacityUnits = batchWriteItemResponse.consumedCapacity().iterator().next().capacityUnits();
         wcuMeter.mark(consumedCapacityUnits.longValue());
