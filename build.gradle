@@ -1,0 +1,19 @@
+apply plugin: "java"
+apply plugin: "application" // for the "run" task
+
+repositories {
+    jcenter()
+}
+
+dependencies {
+	implementation "com.google.code.gson:gson:+"
+	implementation "com.google.guava:guava:+"
+	implementation 'com.codahale.metrics:metrics-core:+'
+
+    // aws sdk 2
+	implementation platform("software.amazon.awssdk:bom:+")
+	implementation "software.amazon.awssdk:dynamodb"
+
+}
+
+mainClassName = "TryMain"
