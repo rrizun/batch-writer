@@ -5,6 +5,9 @@ import java.io.ByteArrayOutputStream;
 import java.io.OutputStream;
 import java.io.OutputStreamWriter;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
 import java.util.Random;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
@@ -14,6 +17,9 @@ import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.zip.GZIPOutputStream;
 
+import com.codahale.metrics.Meter;
+import com.codahale.metrics.MetricRegistry;
+import com.google.common.collect.ImmutableMap;
 import com.google.common.io.BaseEncoding;
 import com.google.common.io.ByteStreams;
 import com.google.common.util.concurrent.MoreExecutors;
@@ -23,38 +29,61 @@ import com.google.gson.JsonObject;
 import com.google.gson.stream.JsonWriter;
 
 import helpers.LogHelper;
+import software.amazon.awssdk.http.apache.ApacheHttpClient;
+import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
+import software.amazon.awssdk.services.dynamodb.model.AttributeValue;
+import software.amazon.awssdk.services.dynamodb.model.BatchWriteItemRequest;
+import software.amazon.awssdk.services.dynamodb.model.BatchWriteItemResponse;
+import software.amazon.awssdk.services.dynamodb.model.PutRequest;
+import software.amazon.awssdk.services.dynamodb.model.ReturnConsumedCapacity;
+import software.amazon.awssdk.services.dynamodb.model.WriteRequest;
 
 public class DynamoWriter {
 
     // config
+    private final String tableName;
     private final long lingerMs;
+
+    private final DynamoDbClient dynamo = DynamoDbClient.builder()
+    //
+    .httpClientBuilder(ApacheHttpClient.builder()
+    //
+    .maxConnections(10000/25)) //###TODO  NEEDED???
+    //
+    .build();
+
 
     // batch thread
     private final ScheduledExecutorService batchThread = Executors.newSingleThreadScheduledExecutor();
     
     // batch thread state
-    private ByteArrayOutputStream baos = new ByteArrayOutputStream();
-    private JsonWriter jsonWriter = new JsonWriter(new OutputStreamWriter(baos));
-    private ScheduledFuture<?> scheduledPublishFuture;
+    // private ByteArrayOutputStream baos = new ByteArrayOutputStream();
+    // private JsonWriter jsonWriter = new JsonWriter(new OutputStreamWriter(baos));
+    private List<WriteRequest> requestItems = new ArrayList<>();
+    // private ScheduledFuture<?> scheduledPublishFuture;
+
 
     // publish threads
     private final ExecutorService publishPool = Executors.newCachedThreadPool();
 
+    private final MetricRegistry metrics = new MetricRegistry();
+    private final Meter wcuMeter = metrics.meter("wcu");
+
     /**
      * ctor
      * 
-     * @param compress
+     * @param tableName
      * @param lingerMs
      * @throws Exception
      */
-    public DynamoWriter(long lingerMs) throws Exception {
+    public DynamoWriter(String tableName, long lingerMs) throws Exception {
+        this.tableName = tableName;
         this.lingerMs = lingerMs;
     }
 
     public void start() throws Exception {
         batchThread.execute(() -> {
             try {
-                jsonWriter.beginArray();
             } catch (Exception e) {
                 throw new RuntimeException(e);
             }
@@ -65,43 +94,24 @@ public class DynamoWriter {
     public void close() throws Exception {
         batchThread.execute(()->{
             try {
-                jsonWriter.endArray();
                 publishNow(); // does not block
             } catch (Exception e) {
                 throw new RuntimeException(e);
             }
         });
-
-        // batchPool.shutdown();
-        // batchPool.awaitTermination(Long.MAX_VALUE, TimeUnit.SECONDS);
         MoreExecutors.shutdownAndAwaitTermination(batchThread, Duration.ofMillis(Long.MAX_VALUE));
-
-        // publishPool.shutdown();
-        // publishPool.awaitTermination(Long.MAX_VALUE, TimeUnit.SECONDS);
         MoreExecutors.shutdownAndAwaitTermination(publishPool, Duration.ofMillis(Long.MAX_VALUE));
     }
 
     /**
      * addUserRecord
      */
-    public void addUserRecord(JsonElement jsonElement) {
+    public void addWriteRequest(Map<String, AttributeValue> item) {
         batchThread.execute(() -> {
             try {
-                String jsonValue = jsonElement.toString();
-                
-                // will this exceed the max msg len?
-                final int MAX_MSG_LEN = 256*1024; // sns/sqs 256KB
-                if (baos.size() + jsonValue.length() > MAX_MSG_LEN - 1) { // the -1 is for closing the json array with a ']'
-                    
-                    // yes- publish now
-                    jsonWriter.endArray();
-                    publishNow(); // does not block
-                    jsonWriter.beginArray();
-                    
-                }
-
-                jsonWriter.jsonValue(jsonValue);
-                jsonWriter.flush();
+                requestItems.add(WriteRequest.builder().putRequest(PutRequest.builder().item(item).build()).build());
+                if (requestItems.size() == 25)
+                    publishNow();
             } catch (Exception e) {
                 throw new RuntimeException(e);
             }
@@ -109,92 +119,55 @@ public class DynamoWriter {
     }
 
     private void schedulePublish() {
-        scheduledPublishFuture = batchThread.schedule(()->{
-            try {
-                jsonWriter.endArray();
-                publishNow(); // does not block
-                jsonWriter.beginArray();
-            } catch (Exception e) {
-                throw new RuntimeException(e);
-            }
-        }, lingerMs, TimeUnit.MILLISECONDS);
+        // scheduledPublishFuture = batchThread.schedule(()->{
+        //     try {
+        //         publishNow(); // does not block
+        //     } catch (Exception e) {
+        //         throw new RuntimeException(e);
+        //     }
+        // }, lingerMs, TimeUnit.MILLISECONDS);
     }
 
     private void cancelScheduledPublish() {
-        scheduledPublishFuture.cancel(true);
+        // scheduledPublishFuture.cancel(true);
     }
 
     // this is run within the batchPool context
     private void publishNow() throws Exception {
+        // cancel scheduled publish
+        cancelScheduledPublish();
 
-            // cancel scheduled publish
-            cancelScheduledPublish();
+        if (requestItems.size() > 0) {
 
-            // STEP 1 close
-            jsonWriter.close();
+            BatchWriteItemRequest batchWriteItemRequest = BatchWriteItemRequest.builder()
+                    //
+                    .requestItems(ImmutableMap.of(tableName, requestItems))
+                    //
+                    .returnConsumedCapacity(ReturnConsumedCapacity.TOTAL)
+                    //
+                    .build();
 
-            // STEP 2 publish
-            String[] utf8 = new String[] { new String(baos.toByteArray()) };
-
-            // log(baos.size(), utf8[0].length());
-            publishPool.execute(()->{
-                log(utf8[0].length(), utf8[0].substring(0, Math.min(utf8[0].length(), 120)));
-                //###TODO do actual sns publish here
+            publishPool.execute(() -> {
                 try {
-                    Thread.sleep(2000);
+                    BatchWriteItemResponse batchWriteItemResponse = dynamo.batchWriteItem(batchWriteItemRequest);
+                    Double consumedCapacityUnits = batchWriteItemResponse.consumedCapacity().iterator().next()
+                            .capacityUnits();
+                    wcuMeter.mark(consumedCapacityUnits.longValue());
+                    log("wcuMeterMeanRate", Double.valueOf(wcuMeter.getMeanRate()).intValue());
                 } catch (Exception e) {
                     throw new RuntimeException(e);
                 }
             });
-            
-            // STEP 3 start
-            baos.reset();
-            jsonWriter = new JsonWriter(new OutputStreamWriter(baos));
 
-            // reschedule scheduled publish
-            schedulePublish();
+            requestItems = new ArrayList<>();
+        }
 
+        // reschedule scheduled publish
+        schedulePublish();
     }
 
     private void log(Object... args) {
         new LogHelper(this).log(args);
     }
  
-    public static void main(String... args) throws Exception {
-        
-        // start time
-        final long t0 = System.currentTimeMillis();
-        
-        final BatchWriter topicWriter = new BatchWriter(false, 2000);
-        try {
-            System.out.println("start");
-            topicWriter.start();
-
-            final RateLimiter rateLimiter = RateLimiter.create(1000000000); // per second
-            for (int i = 0; i < 100000; ++i) {
-                JsonObject userRecord = new JsonObject();
-                userRecord.addProperty("foo", "bar");
-                userRecord.addProperty("baz", new Random().nextInt());
-                // userRecord.addProperty("uuid", UUID.randomUUID().toString());
-                userRecord.addProperty("version", System.currentTimeMillis());
-
-                // does not block
-                 topicWriter.addUserRecord(userRecord);
-
-                // rate limit
-                rateLimiter.acquire();
-            }
-
-        } finally {
-            System.out.println("close");
-            topicWriter.close();
-            System.out.println("closed");
-        }
-        
-        // finish time
-        System.out.println(System.currentTimeMillis() - t0);
-
-    }
-
-
 }
