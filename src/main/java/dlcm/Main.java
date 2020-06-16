@@ -6,7 +6,6 @@ import java.util.Map;
 import com.google.common.hash.Hashing;
 import com.google.common.util.concurrent.FutureCallback;
 import com.google.common.util.concurrent.Futures;
-import com.google.common.util.concurrent.MoreExecutors;
 import com.google.common.util.concurrent.RateLimiter;
 
 import org.checkerframework.checker.nullness.qual.Nullable;
@@ -39,24 +38,25 @@ public class Main {
 
       final int rate = 12000; // per second
       final RateLimiter rateLimiter = RateLimiter.create(rate);
-      for (int i = 0; i < 10 * rate; ++i) {
-
+      for (int i = 0; i < 5 * rate; ++i) {
         Futures.addCallback(dynamoWriter.addWriteRequest(createItem(i % 10000)), new FutureCallback<Void>() {
-
           @Override
           public void onSuccess(@Nullable Void result) {
             ++successCount;
           }
-
           @Override
           public void onFailure(Throwable t) {
+            log(t);
             ++failureCount;
           }
-        }, MoreExecutors.directExecutor());
+        }, dynamoWriter.executor());
 
         // rate limit
         rateLimiter.acquire();
       }
+
+      // squeeze out that last batch
+      dynamoWriter.flush();
 
     } finally {
       log("close");
