@@ -18,6 +18,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.zip.GZIPOutputStream;
 
@@ -52,7 +53,7 @@ public class DynamoWriter {
 
     private final NettyNioAsyncHttpClient.Builder httpClientBuilder = NettyNioAsyncHttpClient.builder()
     //
-        .maxConcurrency(10000/25)
+        .maxConcurrency(10000)
         // //
         // .maxPendingConnectionAcquires(10_000)
         //
@@ -114,7 +115,7 @@ public class DynamoWriter {
         });
 
         synchronized (this) {
-            while(inFlight!=0)
+            while(inFlight.get()!=0)
                 wait();
         }
 
@@ -191,11 +192,11 @@ public class DynamoWriter {
         schedulePublish();
     }
 
-    private int inFlight;
+    private final AtomicInteger inFlight = new AtomicInteger();
 
     private void doBatchWriteItem(Map<String, ? extends Collection<WriteRequest>> requestItems) {
 
-        ++inFlight;
+        inFlight.incrementAndGet();
 
         BatchWriteItemRequest batchWriteItemRequest = BatchWriteItemRequest.builder()
                 //
@@ -230,7 +231,7 @@ public class DynamoWriter {
                 e.printStackTrace();
                 throw new RuntimeException(e);
             } finally {
-                --inFlight;
+                inFlight.decrementAndGet();
                 synchronized(DynamoWriter.this) {
                     DynamoWriter.this.notify();
                 }
