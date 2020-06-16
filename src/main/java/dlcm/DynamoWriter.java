@@ -41,6 +41,7 @@ import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
 import software.amazon.awssdk.services.dynamodb.model.AttributeValue;
 import software.amazon.awssdk.services.dynamodb.model.BatchWriteItemRequest;
 import software.amazon.awssdk.services.dynamodb.model.BatchWriteItemResponse;
+import software.amazon.awssdk.services.dynamodb.model.ConsumedCapacity;
 import software.amazon.awssdk.services.dynamodb.model.PutRequest;
 import software.amazon.awssdk.services.dynamodb.model.ReturnConsumedCapacity;
 import software.amazon.awssdk.services.dynamodb.model.WriteRequest;
@@ -78,6 +79,7 @@ public class DynamoWriter {
 
 
     // publish threads
+    @Deprecated
     private final ExecutorService publishPool = Executors.newCachedThreadPool();
 
     private final MetricRegistry metrics = new MetricRegistry();
@@ -197,7 +199,12 @@ public class DynamoWriter {
 
     private void doBatchWriteItem(Map<String, ? extends Collection<WriteRequest>> requestItems) {
 
-        inFlight.incrementAndGet();
+        wcuMeter().mark(0); // for accuracy
+
+        //         Jun 16, 2020 4:14:42 AM io.netty.channel.DefaultChannelPipeline onUnhandledInboundException
+        // WARNING: An exceptionCaught() event was fired, and it reached at the tail of the pipeline. It usually means the last handler in the pipeline did not handle the exception.
+        // java.io.IOException: Request cancelled
+        //         at software.amazon.awssdk.http.nio.netty.internal.FutureCancelHandler.exceptionCaught(FutureCancelHandler.java:43)
 
         BatchWriteItemRequest batchWriteItemRequest = BatchWriteItemRequest.builder()
                 //
@@ -207,54 +214,36 @@ public class DynamoWriter {
                 //
                 .build();
 
-        dynamo.batchWriteItem(batchWriteItemRequest).thenAccept(batchWriteItemResponse->{
+        inFlight.incrementAndGet();
 
-            try {
-                if (batchWriteItemResponse.sdkHttpResponse().isSuccessful()) {
-
-                    Double consumedCapacityUnits = batchWriteItemResponse.consumedCapacity().iterator().next()
-                            .capacityUnits();
-                    total.addAndGet(consumedCapacityUnits.longValue());
-                    log("consumedCapacityUnits", consumedCapacityUnits);
-                    wcuMeter().mark(consumedCapacityUnits.longValue());
-                    log("wcuMeterMeanRate", Double.valueOf(wcuMeter().getMeanRate()).intValue());
-
-                    if (batchWriteItemResponse.hasUnprocessedItems()) {
-                        if (!batchWriteItemResponse.unprocessedItems().isEmpty())
-                            doBatchWriteItem(batchWriteItemResponse.unprocessedItems());
+        dynamo.batchWriteItem(batchWriteItemRequest)
+                //
+                .thenAccept(batchWriteItemResponse -> {
+                    if (batchWriteItemResponse.sdkHttpResponse().isSuccessful()) {
+                        for (ConsumedCapacity consumedCapacity : batchWriteItemResponse.consumedCapacity()) {
+                            Double consumedCapacityUnits = consumedCapacity.capacityUnits();
+                            total.addAndGet(consumedCapacityUnits.longValue());
+                            log("consumedCapacityUnits", consumedCapacityUnits);
+                            wcuMeter().mark(consumedCapacityUnits.longValue());
+                            log("wcuMeterMeanRate", Double.valueOf(wcuMeter().getMeanRate()).intValue());
+                            if (batchWriteItemResponse.hasUnprocessedItems()) {
+                                if (!batchWriteItemResponse.unprocessedItems().isEmpty())
+                                    doBatchWriteItem(batchWriteItemResponse.unprocessedItems());
+                            }
+                        }
+                    } else {
+                        log(batchWriteItemResponse);
                     }
-
-                } else {
-                    log(batchWriteItemResponse);
-                }
-            } catch (Exception e) {
-                e.printStackTrace();
-                throw new RuntimeException(e);
-            } finally {
-                inFlight.decrementAndGet();
-                synchronized(DynamoWriter.this) {
-                    DynamoWriter.this.notify();
-                }
-            }
-
-        });
-        
-        
-        // publishPool.execute(()->{
-        //     try {
-        //         BatchWriteItemResponse batchWriteItemResponse = dynamo.batchWriteItem(batchWriteItemRequest).get();
-
-        //     } catch (Exception e) {
-        //         e.printStackTrace();
-        //         throw new RuntimeException(e);
-        //     } finally {
-        //         inFlight.decrementAndGet();
-        //         synchronized(DynamoWriter.this) {
-        //             DynamoWriter.this.notify();
-        //         }
-        //     }
-
-        // });
+                })
+                //
+                .whenComplete((a, b) -> {
+                    inFlight.decrementAndGet();
+                    synchronized (DynamoWriter.this) {
+                        DynamoWriter.this.notify();
+                    }
+                })
+        //
+        ;        
 
     }
 
