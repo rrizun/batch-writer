@@ -1,130 +1,122 @@
 package dlcm;
 
-import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
-import java.io.OutputStream;
-import java.io.OutputStreamWriter;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Random;
-import java.util.UUID;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CountDownLatch;
+import java.util.Map.Entry;
+import java.util.concurrent.CompletionService;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.ScheduledFuture;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
-import java.util.zip.GZIPOutputStream;
 
 import com.codahale.metrics.Meter;
 import com.codahale.metrics.MetricRegistry;
+import com.google.common.base.Defaults;
 import com.google.common.collect.ImmutableMap;
-import com.google.common.io.BaseEncoding;
-import com.google.common.io.ByteStreams;
+import com.google.common.collect.Lists;
+import com.google.common.util.concurrent.AbstractFuture;
+import com.google.common.util.concurrent.ListenableFuture;
 import com.google.common.util.concurrent.MoreExecutors;
-import com.google.common.util.concurrent.RateLimiter;
-import com.google.gson.JsonElement;
-import com.google.gson.JsonObject;
-import com.google.gson.stream.JsonWriter;
+import com.google.common.util.concurrent.SettableFuture;
+
+import org.checkerframework.checker.units.qual.s;
 
 import helpers.LogHelper;
-import software.amazon.awssdk.http.apache.ApacheHttpClient;
 import software.amazon.awssdk.http.nio.netty.NettyNioAsyncHttpClient;
 import software.amazon.awssdk.services.dynamodb.DynamoDbAsyncClient;
-import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
 import software.amazon.awssdk.services.dynamodb.model.AttributeValue;
 import software.amazon.awssdk.services.dynamodb.model.BatchWriteItemRequest;
-import software.amazon.awssdk.services.dynamodb.model.BatchWriteItemResponse;
 import software.amazon.awssdk.services.dynamodb.model.ConsumedCapacity;
+import software.amazon.awssdk.services.dynamodb.model.PutItemRequest;
 import software.amazon.awssdk.services.dynamodb.model.PutRequest;
 import software.amazon.awssdk.services.dynamodb.model.ReturnConsumedCapacity;
 import software.amazon.awssdk.services.dynamodb.model.WriteRequest;
+
+//###TODO rename to something better
+//###TODO rename to something better
+//###TODO rename to something better
+class WriteItemFuture extends AbstractFuture<Void> {
+//###TODO rename to something better
+//###TODO rename to something better
+//###TODO rename to something better
+public boolean set(Void value) {
+        return super.set(value);
+    }
+    public boolean setException(Throwable throwable) {
+        return super.setException(throwable);
+    }
+}
 
 public class DynamoWriter {
 
     // config
     private final String tableName;
-    private final long lingerMs;
 
     private final NettyNioAsyncHttpClient.Builder httpClientBuilder = NettyNioAsyncHttpClient.builder()
+            //
+            .maxConcurrency(10000)
+    // //
+    // .maxPendingConnectionAcquires(10_000)
     //
-        .maxConcurrency(10000)
-        // //
-        // .maxPendingConnectionAcquires(10_000)
-        //
-        ;
-
+    ;
 
     private final DynamoDbAsyncClient dynamo = DynamoDbAsyncClient.builder()
-    //
-    .httpClientBuilder(httpClientBuilder)
-    //
-    .build();
-
+            //
+            .httpClientBuilder(httpClientBuilder)
+            //
+            .build();
 
     // batch thread
-    private final ScheduledExecutorService batchThread = Executors.newSingleThreadScheduledExecutor();
-    
+    private final ExecutorService batchThread = Executors.newSingleThreadExecutor();
+
     // batch thread state
     // private ByteArrayOutputStream baos = new ByteArrayOutputStream();
     // private JsonWriter jsonWriter = new JsonWriter(new OutputStreamWriter(baos));
-    private List<WriteRequest> writeRequests = new ArrayList<>();
+    private Map<WriteRequest, WriteItemFuture> writeRequests = new HashMap<>();
     // private ScheduledFuture<?> scheduledPublishFuture;
-
-
-    // publish threads
-    @Deprecated
-    private final ExecutorService publishPool = Executors.newCachedThreadPool();
 
     private final MetricRegistry metrics = new MetricRegistry();
 
-    private Meter wcuMeter() { return metrics.meter("wcu"); }
+    private Meter wcuMeter() {
+        return metrics.meter("wcu");
+    }
 
     /**
      * ctor
      * 
      * @param tableName
-     * @param lingerMs
      * @throws Exception
      */
-    public DynamoWriter(String tableName, long lingerMs) throws Exception {
+    public DynamoWriter(String tableName) throws Exception {
         this.tableName = tableName;
-        this.lingerMs = lingerMs;
     }
 
     public void start() throws Exception {
         wcuMeter().mark(0);
-        batchThread.execute(() -> {
-            try {
-            } catch (Exception e) {
-                throw new RuntimeException(e);
-            }
-        });
-        schedulePublish();
     }
 
-    public void close() throws Exception {
-        batchThread.execute(()->{
+    public void flush() {
+        batchThread.execute(() -> {
             try {
                 publishNow(); // does not block
             } catch (Exception e) {
                 throw new RuntimeException(e);
             }
         });
+    }
 
+    public void close() throws Exception {
+        flush();
         synchronized (this) {
-            while(inFlight.get()!=0)
+            while (inFlight.get() != 0)
                 wait();
         }
-
+        dynamo.close();
         MoreExecutors.shutdownAndAwaitTermination(batchThread, Duration.ofMillis(Long.MAX_VALUE));
-        MoreExecutors.shutdownAndAwaitTermination(publishPool, Duration.ofMillis(Long.MAX_VALUE));
     }
 
     public int writeRequestCount;
@@ -132,73 +124,41 @@ public class DynamoWriter {
     /**
      * addUserRecord
      */
-    public void addWriteRequest(Map<String, AttributeValue> item) {
+    public ListenableFuture<Void> addWriteRequest(Map<String, AttributeValue> item) {
         ++writeRequestCount;
-        batchThread.execute(() -> {
-            try {
-                writeRequests.add(WriteRequest.builder().putRequest(PutRequest.builder().item(item).build()).build());
-                if (writeRequests.size() == 25)
-                    publishNow();
-            } catch (Exception e) {
-                throw new RuntimeException(e);
+        return new WriteItemFuture() {
+            {
+                batchThread.execute(() -> {
+                    try {
+                        writeRequests.put(WriteRequest.builder().putRequest(PutRequest.builder().item(item).build()).build(), this);
+                        if (writeRequests.size() == 25)
+                            publishNow();
+                        set(Defaults.defaultValue(Void.class));
+                    } catch (Exception e) {
+                        setException(e);
+                    }
+                });
             }
-        });
+        };
     }
 
     public final AtomicLong total = new AtomicLong();
-    
+
     // this is run within the batchPool context
     private void publishNow() throws Exception {
-        // cancel scheduled publish
-        cancelScheduledPublish();
 
         if (writeRequests.size() > 0) {
 
-            doBatchWriteItem(ImmutableMap.of(tableName, writeRequests));
+            doBatchWriteItem(writeRequests);
 
-            // BatchWriteItemRequest batchWriteItemRequest = BatchWriteItemRequest.builder()
-            //         //
-            //         .requestItems()
-            //         //
-            //         .returnConsumedCapacity(ReturnConsumedCapacity.TOTAL)
-            //         //
-            //         .build();
-
-            // publishPool.execute(() -> {
-            //     try {
-
-            //         BatchWriteItemResponse batchWriteItemResponse = dynamo.batchWriteItem(batchWriteItemRequest).get();
-
-            //         if (batchWriteItemResponse.hasUnprocessedItems()) {
-            //             for (List<WriteRequest> unprocessedItems : batchWriteItemResponse.unprocessedItems().values()) {
-            //                 for (WriteRequest writeRequest : unprocessedItems)
-            //                     addWriteRequest(writeRequest.putRequest().item()); // ### TODO ugly
-            //             }
-            //         }
-
-            //         Double consumedCapacityUnits = batchWriteItemResponse.consumedCapacity().iterator().next().capacityUnits();
-            //         total.addAndGet(consumedCapacityUnits.longValue());
-            //         log("consumedCapacityUnits", consumedCapacityUnits);
-            //         wcuMeter.mark(consumedCapacityUnits.longValue());
-            //         log("wcuMeterMeanRate", Double.valueOf(wcuMeter.getMeanRate()).intValue());
-
-            //     } catch (Exception e) {
-            //         e.printStackTrace();;
-            //         System.exit(-1);
-            //         throw new RuntimeException(e);
-            //     }
-            // });
-
-            writeRequests = new ArrayList<>();
+            writeRequests = new HashMap<>();
         }
 
-        // reschedule scheduled publish
-        schedulePublish();
     }
 
     private final AtomicInteger inFlight = new AtomicInteger();
 
-    private void doBatchWriteItem(Map<String, ? extends Collection<WriteRequest>> requestItems) {
+    private void doBatchWriteItem(final Map<WriteRequest, WriteItemFuture> writeRequestAndWriteItemFutureMap) {
 
         //         Jun 16, 2020 4:14:42 AM io.netty.channel.DefaultChannelPipeline onUnhandledInboundException
         // WARNING: An exceptionCaught() event was fired, and it reached at the tail of the pipeline. It usually means the last handler in the pipeline did not handle the exception.
@@ -207,7 +167,7 @@ public class DynamoWriter {
 
         BatchWriteItemRequest batchWriteItemRequest = BatchWriteItemRequest.builder()
                 //
-                .requestItems(requestItems)
+                .requestItems(ImmutableMap.of(tableName, writeRequestAndWriteItemFutureMap.keySet()))
                 //
                 .returnConsumedCapacity(ReturnConsumedCapacity.TOTAL)
                 //
@@ -217,47 +177,52 @@ public class DynamoWriter {
 
         dynamo.batchWriteItem(batchWriteItemRequest)
                 //
-                .thenAccept(batchWriteItemResponse -> {
-                    if (batchWriteItemResponse.sdkHttpResponse().isSuccessful()) {
-                        for (ConsumedCapacity consumedCapacity : batchWriteItemResponse.consumedCapacity()) {
-                            Double consumedCapacityUnits = consumedCapacity.capacityUnits();
-                            total.addAndGet(consumedCapacityUnits.longValue());
-                            log("consumedCapacityUnits", consumedCapacityUnits);
-                            wcuMeter().mark(consumedCapacityUnits.longValue());
-                            log("wcuMeterMeanRate", Double.valueOf(wcuMeter().getMeanRate()).intValue());
-                            if (batchWriteItemResponse.hasUnprocessedItems()) {
-                                if (!batchWriteItemResponse.unprocessedItems().isEmpty())
-                                    doBatchWriteItem(batchWriteItemResponse.unprocessedItems());
+                .whenComplete((batchWriteItemResponse, throwable) -> {
+                    try {
+                        if (throwable!=null) {
+                            for (WriteItemFuture future : writeRequestAndWriteItemFutureMap.values())
+                                future.setException(throwable);
+                        } else {
+                            if (batchWriteItemResponse.sdkHttpResponse().isSuccessful()) {
+                                for (ConsumedCapacity consumedCapacity : batchWriteItemResponse.consumedCapacity()) {
+                                    Double consumedCapacityUnits = consumedCapacity.capacityUnits();
+                                    total.addAndGet(consumedCapacityUnits.longValue());
+                                    log("consumedCapacityUnits", consumedCapacityUnits);
+                                    wcuMeter().mark(consumedCapacityUnits.longValue());
+                                    log("wcuMeterMeanRate", Double.valueOf(wcuMeter().getMeanRate()).intValue());
+        
+                                    // process unprocessedItems
+                                    Map<WriteRequest, WriteItemFuture> toBeRetried = new HashMap<>();
+                                    if (batchWriteItemResponse.hasUnprocessedItems()) {
+                                        for (List<WriteRequest> unprocessedItems : batchWriteItemResponse.unprocessedItems().values()) {
+                                                for (Entry<WriteRequest, WriteItemFuture> entry : writeRequestAndWriteItemFutureMap.entrySet()) {
+                                                    if (!unprocessedItems.contains(entry.getKey()))
+                                                        entry.getValue().set(Defaults.defaultValue(Void.class)); // success
+                                                    else
+                                                        toBeRetried.put(entry.getKey(), entry.getValue()); // retry
+                                                }
+                                        }
+                                    }
+                                    if (!toBeRetried.isEmpty())
+                                        doBatchWriteItem(toBeRetried);
+                                }
+                            } else {
+                                log(batchWriteItemResponse);
                             }
                         }
-                    } else {
-                        log(batchWriteItemResponse);
+                    } finally {
+                        inFlight.decrementAndGet();
+                        synchronized (DynamoWriter.this) {
+                            DynamoWriter.this.notify();
+                        }
                     }
                 })
-                //
-                .whenComplete((a, b) -> {
-                    inFlight.decrementAndGet();
-                    synchronized (DynamoWriter.this) {
-                        DynamoWriter.this.notify();
-                    }
-                })
+                // //
+                // .thenAccept(batchWriteItemResponse -> {
+                // })
         //
         ;        
 
-    }
-
-    private void schedulePublish() {
-        // scheduledPublishFuture = batchThread.schedule(()->{
-        //     try {
-        //         publishNow(); // does not block
-        //     } catch (Exception e) {
-        //         throw new RuntimeException(e);
-        //     }
-        // }, lingerMs, TimeUnit.MILLISECONDS);
-    }
-
-    private void cancelScheduledPublish() {
-        // scheduledPublishFuture.cancel(true);
     }
 
     private void log(Object... args) {
