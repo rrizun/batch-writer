@@ -81,7 +81,8 @@ public class DynamoWriter {
     private final ExecutorService publishPool = Executors.newCachedThreadPool();
 
     private final MetricRegistry metrics = new MetricRegistry();
-    private final Meter wcuMeter = metrics.meter("wcu");
+
+    private Meter wcuMeter() { return metrics.meter("wcu"); }
 
     /**
      * ctor
@@ -206,18 +207,17 @@ public class DynamoWriter {
                 //
                 .build();
 
-        publishPool.execute(()->{
-            try {
-                BatchWriteItemResponse batchWriteItemResponse = dynamo.batchWriteItem(batchWriteItemRequest).get();
+        dynamo.batchWriteItem(batchWriteItemRequest).thenAccept(batchWriteItemResponse->{
 
+            try {
                 if (batchWriteItemResponse.sdkHttpResponse().isSuccessful()) {
 
                     Double consumedCapacityUnits = batchWriteItemResponse.consumedCapacity().iterator().next()
                             .capacityUnits();
                     total.addAndGet(consumedCapacityUnits.longValue());
                     log("consumedCapacityUnits", consumedCapacityUnits);
-                    wcuMeter.mark(consumedCapacityUnits.longValue());
-                    log("wcuMeterMeanRate", Double.valueOf(wcuMeter.getMeanRate()).intValue());
+                    wcuMeter().mark(consumedCapacityUnits.longValue());
+                    log("wcuMeterMeanRate", Double.valueOf(wcuMeter().getMeanRate()).intValue());
 
                     if (batchWriteItemResponse.hasUnprocessedItems()) {
                         if (!batchWriteItemResponse.unprocessedItems().isEmpty())
@@ -238,6 +238,23 @@ public class DynamoWriter {
             }
 
         });
+        
+        
+        // publishPool.execute(()->{
+        //     try {
+        //         BatchWriteItemResponse batchWriteItemResponse = dynamo.batchWriteItem(batchWriteItemRequest).get();
+
+        //     } catch (Exception e) {
+        //         e.printStackTrace();
+        //         throw new RuntimeException(e);
+        //     } finally {
+        //         inFlight.decrementAndGet();
+        //         synchronized(DynamoWriter.this) {
+        //             DynamoWriter.this.notify();
+        //         }
+        //     }
+
+        // });
 
     }
 
