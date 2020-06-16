@@ -47,6 +47,9 @@ public class Main {
         // finish time
         log(System.currentTimeMillis() - t0, "ms");
 
+        log("writeRequestCount", dynamoWriter.writeRequestCount);
+        log("totalConsumedCapacity", dynamoWriter.total);
+
   }
 
   private Map<String, AttributeValue> createItem(int i) {
