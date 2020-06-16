@@ -15,7 +15,7 @@ public class Main {
     new Main().run();
   }
 
-  private final String tableName = "DlcmStack-TableCD117FA1-GVAWLZWY3HBE";
+  private final String tableName = "DlcmStack-MyTable794EDED1-Y2SYCRYX65FF";
 
   public void run() throws Exception {
     log("run");
