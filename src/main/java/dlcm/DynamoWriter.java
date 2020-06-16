@@ -99,6 +99,7 @@ public class DynamoWriter {
     }
 
     public void start() throws Exception {
+        wcuMeter().mark(0);
         batchThread.execute(() -> {
             try {
             } catch (Exception e) {
@@ -198,8 +199,6 @@ public class DynamoWriter {
     private final AtomicInteger inFlight = new AtomicInteger();
 
     private void doBatchWriteItem(Map<String, ? extends Collection<WriteRequest>> requestItems) {
-
-        wcuMeter().mark(0); // for accuracy
 
         //         Jun 16, 2020 4:14:42 AM io.netty.channel.DefaultChannelPipeline onUnhandledInboundException
         // WARNING: An exceptionCaught() event was fired, and it reached at the tail of the pipeline. It usually means the last handler in the pipeline did not handle the exception.
