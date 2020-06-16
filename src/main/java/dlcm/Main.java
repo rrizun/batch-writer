@@ -37,8 +37,9 @@ public class Main {
       log("started");
 
       final int rate = 12000; // per second
+      final int numSeconds = 5;
       final RateLimiter rateLimiter = RateLimiter.create(rate);
-      for (int i = 0; i < 5 * rate; ++i) {
+      for (int i = 0; i < rate * numSeconds; ++i) {
         Futures.addCallback(dynamoWriter.addWriteRequest(createItem(i % 10000)), new FutureCallback<Void>() {
           @Override
           public void onSuccess(@Nullable Void result) {
