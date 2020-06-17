@@ -52,7 +52,7 @@ public class DynamoWriter {
 
     private final DynamoDbAsyncClient dynamo = DynamoDbAsyncClient.builder()
             //
-            // .httpClientBuilder(httpClientBuilder)
+            .httpClientBuilder(httpClientBuilder)
             //
             .build();
 
@@ -180,7 +180,7 @@ public class DynamoWriter {
                                     total.addAndGet(consumedCapacityUnits.longValue());
                                     log("consumedCapacityUnits", consumedCapacityUnits);
                                     wcuMeter().mark(consumedCapacityUnits.longValue());
-                                    log("wcuMeterMeanRate", Double.valueOf(wcuMeter().getMeanRate()).intValue());
+                                    log("wcuMeter", Double.valueOf(wcuMeter().getOneMinuteRate()).intValue());
         
                                     // process unprocessedItems
                                     Map<WriteRequest, WriteRequestFuture> toBeRetried = new HashMap<>();

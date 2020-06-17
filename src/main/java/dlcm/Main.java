@@ -19,7 +19,7 @@ public class Main {
     new Main().run();
   }
 
-  private final String tableName = "DlcmStack-MyTable794EDED1-Y2SYCRYX65FF";
+  private final String tableName = "DlcmStack-TableCD117FA1-10BX86V213J7Z";
 
   int successCount;
   int failureCount;
@@ -36,8 +36,8 @@ public class Main {
       dynamoWriter.start();
       log("started");
 
-      final int rate = 12000; // per second
-      final int numSeconds = 5;
+      final int rate = 128; // per second
+      final int numSeconds = 3600;
       final RateLimiter rateLimiter = RateLimiter.create(rate);
       for (int i = 0; i < rate * numSeconds; ++i) {
         Futures.addCallback(dynamoWriter.addWriteRequest(createItem(i % 10000)), new FutureCallback<Void>() {
