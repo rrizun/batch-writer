@@ -5,20 +5,13 @@ import java.io.ByteArrayOutputStream;
 import java.io.OutputStream;
 import java.io.OutputStreamWriter;
 import java.time.Duration;
-import java.util.Random;
-import java.util.Timer;
-import java.util.TimerTask;
-import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.zip.GZIPOutputStream;
 
-import com.codahale.metrics.Meter;
-import com.codahale.metrics.MetricRegistry;
 import com.google.common.hash.Hashing;
 import com.google.common.io.BaseEncoding;
 import com.google.common.io.ByteStreams;
@@ -33,7 +26,6 @@ import com.spotify.futures.CompletableFuturesExtra;
 import helpers.LogHelper;
 import software.amazon.awssdk.http.nio.netty.NettyNioAsyncHttpClient;
 import software.amazon.awssdk.services.sns.SnsAsyncClient;
-import software.amazon.awssdk.services.sns.SnsClient;
 import software.amazon.awssdk.services.sns.model.PublishRequest;
 import software.amazon.awssdk.services.sns.model.PublishResponse;
 
@@ -51,9 +43,6 @@ public class BatchWriter {
     private JsonWriter jsonWriter = new JsonWriter(new OutputStreamWriter(baos));
     private int userRecordBatchCount;
     private ScheduledFuture<?> scheduledPublishFuture;
-
-    // publish threads
-    // private final ExecutorService publishPool = Executors.newCachedThreadPool();
 
     // private static final int DEFAULT_MAX_CONNECTIONS = 50;
     // private static final int DEFAULT_MAX_CONNECTION_ACQUIRES = 10_000;
@@ -79,6 +68,7 @@ public class BatchWriter {
 
     private final MyMeter requestRate = new MyMeter(5);
     private final MyMeter confirmRate = new MyMeter(5);
+    private final MyMeter errorRate = new MyMeter(5);
 
     /**
      * ctor
@@ -225,6 +215,7 @@ public class BatchWriter {
                 } catch (Exception e) {
                     log(e);
                     errorCount += finalUserRecordBatchCount;
+                    errorRate.mark(finalUserRecordBatchCount);
                 } finally {
                     synchronized(busyCond) {
                         --busy;
@@ -265,7 +256,7 @@ public class BatchWriter {
                 rate=Integer.parseInt(args[0]);
             System.out.println("rate:"+rate);
             final RateLimiter rateLimiter = RateLimiter.create(rate); // per second
-            for (int i = 0; i < 60*rate ; ++i) {
+            for (int i = 0; i < 30*rate ; ++i) {
                 JsonObject userRecord = new JsonObject();
                 String key = Hashing.sha256().hashInt(i%rate).toString();
                 userRecord.addProperty("entityKey", key);
@@ -292,8 +283,9 @@ public class BatchWriter {
 
     private void stats() {
         log(
-            String.format("%s/%s", requestRate.average(), requestCount),
-            String.format("%s/%s", confirmRate.average(), confirmCount),
+            String.format("request=%s/%s", requestRate.average(), requestCount),
+            String.format("success=%s/%s", confirmRate.average(), confirmCount),
+            String.format("failure=%s/%s", errorRate.average(), errorCount),
             // "errorCount", errorCount
             ""
             );
