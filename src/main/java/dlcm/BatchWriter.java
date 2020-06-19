@@ -7,6 +7,7 @@ import java.io.OutputStreamWriter;
 import java.time.Duration;
 import java.util.Random;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -19,11 +20,13 @@ import com.codahale.metrics.MetricRegistry;
 import com.google.common.hash.Hashing;
 import com.google.common.io.BaseEncoding;
 import com.google.common.io.ByteStreams;
+import com.google.common.util.concurrent.ListenableFuture;
 import com.google.common.util.concurrent.MoreExecutors;
 import com.google.common.util.concurrent.RateLimiter;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.stream.JsonWriter;
+import com.spotify.futures.CompletableFuturesExtra;
 
 import helpers.LogHelper;
 import software.amazon.awssdk.http.nio.netty.NettyNioAsyncHttpClient;
@@ -47,7 +50,7 @@ public class BatchWriter {
     private ScheduledFuture<?> scheduledPublishFuture;
 
     // publish threads
-    private final ExecutorService publishPool = Executors.newCachedThreadPool();
+    // private final ExecutorService publishPool = Executors.newCachedThreadPool();
 
     // private static final int DEFAULT_MAX_CONNECTIONS = 50;
     // private static final int DEFAULT_MAX_CONNECTION_ACQUIRES = 10_000;
@@ -66,10 +69,6 @@ public class BatchWriter {
     .build();
 
     private final String topicArn = "arn:aws:sns:us-east-2:743203956339:DlcmStack-InputEventTopicC39C99C1-QBIUZXL0AN";
-
-    private final MetricRegistry metricRegistry = new MetricRegistry();
-
-    private final Meter meter = metricRegistry.meter("asdf");
 
     /**
      * ctor
@@ -178,39 +177,54 @@ public class BatchWriter {
         }
         // log(baos.size(), utf8[0].length());
 
-        publishPool.execute(()->{
 
+        log(utf8[0].length(), utf8[0].substring(0, Math.min(utf8[0].length(), 120)));
+
+        PublishRequest publishRequest = PublishRequest.builder()
+        //
+        .topicArn(topicArn)
+        //
+        .message(utf8[0])
+        //
+        .build();
+
+        log(publishRequest.message().length());
+
+        ListenableFuture<PublishResponse> listenableFuture = lf(sns.publish(publishRequest));
+        listenableFuture.addListener(()->{
             try {
-                log(utf8[0].length(), utf8[0].substring(0, Math.min(utf8[0].length(), 120)));
-
-                PublishRequest request = PublishRequest.builder()
-                        //
-                        .topicArn(topicArn)
-                        //
-                        .message(utf8[0])
-                        //
-                        .build();
-    
-                // PublishResponse response =
-                sns.publish(request).whenComplete((a, b) -> {
-                    log(a, b);
-                    if (b!=null)
-                        b.printStackTrace();
-                });
-                // log(response);
-    
-                // //###TODO do actual sns publish here
-                // try {
-                // Thread.sleep(2000);
-                // } catch (Exception e) {
-                // throw new RuntimeException(e);
-                // }
-    
+                PublishResponse publishResponse = listenableFuture.get();
+                log(publishResponse);
             } catch (Exception e) {
-                e.printStackTrace();;
+                log(e);
+                // e.printStackTrace();
             }
+        }, batchThread);
 
-        });
+        // publishPool.execute(()->{
+
+        //     try {
+
+        //         // PublishResponse response =
+        //         sns.publish(publishRequest).whenComplete((a, b) -> {
+        //             log(a, b);
+        //             if (b!=null)
+        //                 b.printStackTrace();
+        //         });
+        //         // log(response);
+    
+        //         // //###TODO do actual sns publish here
+        //         // try {
+        //         // Thread.sleep(2000);
+        //         // } catch (Exception e) {
+        //         // throw new RuntimeException(e);
+        //         // }
+    
+        //     } catch (Exception e) {
+        //         e.printStackTrace();;
+        //     }
+
+        // });
 
         // STEP 3 start
         baos.reset();
@@ -295,5 +309,8 @@ public class BatchWriter {
 
     }
 
-
+    private <T> ListenableFuture<T> lf(CompletableFuture<T> cf) {
+        return CompletableFuturesExtra.toListenableFuture(cf);
+      }
+    
 }
