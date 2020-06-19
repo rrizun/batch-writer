@@ -49,6 +49,7 @@ public class BatchWriter {
     // batch thread state
     private ByteArrayOutputStream baos = new ByteArrayOutputStream();
     private JsonWriter jsonWriter = new JsonWriter(new OutputStreamWriter(baos));
+    private int userRecordBatchCount;
     private ScheduledFuture<?> scheduledPublishFuture;
 
     // publish threads
@@ -72,9 +73,12 @@ public class BatchWriter {
 
     private final String topicArn = "arn:aws:sns:us-east-2:743203956339:DlcmStack-InputEventTopicC39C99C1-QBIUZXL0AN";
 
+    private int requestCount;
+    private int confirmCount;
+    private int errorCount;
+
     private final MyMeter requestRate = new MyMeter(5);
     private final MyMeter confirmRate = new MyMeter(5);
-    private int errorCount;
 
     /**
      * ctor
@@ -87,15 +91,6 @@ public class BatchWriter {
         log("ctor");
         this.compress = compress;
         this.lingerMs = lingerMs;
-
-        //
-        new Timer().scheduleAtFixedRate(new TimerTask(){
-        @Override
-        public void run() {
-          log("requestRate/s", requestRate.average(), "confirmRate/s", confirmRate.average(), "errorCount", errorCount);
-        }
-      }, 0, 2000);
-  
     }
 
     public void start() throws Exception {
@@ -109,6 +104,9 @@ public class BatchWriter {
         schedulePublish();
     }
 
+    private int busy;
+    private final Object busyCond = new Object();
+
     public void close() throws Exception {
         batchThread.execute(() -> {
             try {
@@ -118,21 +116,20 @@ public class BatchWriter {
                 throw new RuntimeException(e);
             }
         });
-
-        // batchPool.shutdown();
-        // batchPool.awaitTermination(Long.MAX_VALUE, TimeUnit.SECONDS);
+        synchronized(busyCond) {
+            while (busy>0)
+                busyCond.wait();
+        }
         MoreExecutors.shutdownAndAwaitTermination(batchThread, Duration.ofMillis(Long.MAX_VALUE));
-
-        // publishPool.shutdown();
-        // publishPool.awaitTermination(Long.MAX_VALUE, TimeUnit.SECONDS);
-        // MoreExecutors.shutdownAndAwaitTermination(publishPool, Duration.ofMillis(Long.MAX_VALUE));
     }
 
     /**
      * addUserRecord
      */
     public void addUserRecord(JsonElement jsonElement) {
+        ++requestCount;
         requestRate.mark(1);
+
         batchThread.execute(() -> {
             try {
                 String jsonValue = jsonElement.toString();
@@ -152,6 +149,9 @@ public class BatchWriter {
 
                 jsonWriter.jsonValue(jsonValue);
                 jsonWriter.flush();
+
+                ++userRecordBatchCount;
+
             } catch (Exception e) {
                 throw new RuntimeException(e);
             }
@@ -177,12 +177,14 @@ public class BatchWriter {
     // this is run within the batchPool context
     private void publishNow() {
 
+        stats();
+
         // cancel scheduled publish
         cancelScheduledPublish();
 
         try {
 
-            // STEP 1 close
+            // STEP 1 close batch
             jsonWriter.close();
 
             // STEP 2 publish
@@ -208,19 +210,34 @@ public class BatchWriter {
 
             trace(publishRequest.message().length());
 
+            final int finalUserRecordBatchCount = userRecordBatchCount; // take snapshot
+
             ListenableFuture<PublishResponse> listenableFuture = lf(sns.publish(publishRequest));
+            ++busy;
+            stats();
             listenableFuture.addListener(()->{
                 try {
                     PublishResponse publishResponse = listenableFuture.get();
                     trace(publishResponse);
+
+                    confirmCount += finalUserRecordBatchCount;
+                    confirmRate.mark(finalUserRecordBatchCount);
                 } catch (Exception e) {
                     log(e);
+                    errorCount += finalUserRecordBatchCount;
+                } finally {
+                    synchronized(busyCond) {
+                        --busy;
+                        busyCond.notifyAll();
+                    }
+                    stats();
                 }
             }, batchThread);
 
-            // STEP 3 start
+            // STEP 3 start new batch
             baos.reset();
             jsonWriter = new JsonWriter(new OutputStreamWriter(baos));
+            userRecordBatchCount = 0;
 
         } catch (Exception e) {
             throw new RuntimeException(e);
@@ -248,7 +265,7 @@ public class BatchWriter {
                 rate=Integer.parseInt(args[0]);
             System.out.println("rate:"+rate);
             final RateLimiter rateLimiter = RateLimiter.create(rate); // per second
-            for (int i = 0; i < 3600*rate ; ++i) {
+            for (int i = 0; i < 60*rate ; ++i) {
                 JsonObject userRecord = new JsonObject();
                 String key = Hashing.sha256().hashInt(i%rate).toString();
                 userRecord.addProperty("entityKey", key);
@@ -269,8 +286,17 @@ public class BatchWriter {
         }
         
         // finish time
-        System.out.println(System.currentTimeMillis() - t0);
+        System.out.println((System.currentTimeMillis() - t0)+"ms");
 
+    }
+
+    private void stats() {
+        log(
+            String.format("%s/%s", requestRate.average(), requestCount),
+            String.format("%s/%s", confirmRate.average(), confirmCount),
+            // "errorCount", errorCount
+            ""
+            );
     }
 
     private <T> ListenableFuture<T> lf(CompletableFuture<T> cf) {
