@@ -1,0 +1,2 @@
+#!/bin/sh
+./gradlew -Dfoo=$(basename $0) run
