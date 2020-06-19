@@ -119,7 +119,6 @@ public class QueueReceiver {
 
       ListenableFuture<ReceiveMessageResponse> listenableFuture = lf(sqs.receiveMessage(receiveMessageRequest));
       ++busy;
-      stats(i);
       listenableFuture.addListener(()->{
         try {
           ReceiveMessageResponse receiveMessageResponse = listenableFuture.get();
@@ -135,6 +134,7 @@ public class QueueReceiver {
               trace("receiveMessage", abbrev(jsonArray.toString()));
 
               receiveMeter.mark(jsonArray.size());
+              stats(i);
 
               // ----------------------------------------------------------------------
               // deleteMessage
@@ -157,15 +157,16 @@ public class QueueReceiver {
                   DeleteMessageResponse deleteMessageResponse = deleteMessageResponseFuture.get();
                   trace(deleteMessageResponse);
                   successMeter.mark(jsonArray.size());
+                  stats(i);
                 } catch (Exception e) {
                   log(e);
                   failureMeter.mark(jsonArray.size());
+                  stats(i);
                 } finally {
                   --busy;
                   synchronized (busyCond) {
                     busyCond.notifyAll();
                   }
-                  stats(i);
                 }
               }, executor);
             }
