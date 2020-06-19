@@ -62,9 +62,9 @@ public class BatchWriter {
 
     private final String topicArn = "arn:aws:sns:us-east-2:743203956339:DlcmStack-InputEventTopicC39C99C1-QBIUZXL0AN";
 
-    private int requestCount;
-    private int confirmCount;
-    private int errorCount;
+    private long requestCount;
+    private long confirmCount;
+    private long errorCount;
 
     private final MyMeter requestRate = new MyMeter(5);
     private final MyMeter confirmRate = new MyMeter(5);
@@ -259,7 +259,7 @@ public class BatchWriter {
                 rate=Integer.parseInt(args[0]);
             System.out.println("rate:"+rate);
             final RateLimiter rateLimiter = RateLimiter.create(rate); // per second
-            for (int i = 0; i < 50*rate ; ++i) {
+            for (int i = 0; i < 120*rate ; ++i) {
                 JsonObject userRecord = new JsonObject();
                 String key = Hashing.sha256().hashInt(i%rate).toString();
                 userRecord.addProperty("entityKey", key);
