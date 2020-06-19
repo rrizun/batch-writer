@@ -1,2 +1,7 @@
 #!/bin/sh
-./gradlew -Dfoo=$(basename $0) run
+if [ $# -eq 0 ]
+then
+  ./gradlew -Dfoo=$(basename "$0") run
+else
+  ./gradlew -Dfoo=$(basename "$0") run --args="$@"
+fi
