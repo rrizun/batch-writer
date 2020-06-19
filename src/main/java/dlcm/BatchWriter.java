@@ -170,8 +170,6 @@ public class BatchWriter {
     // this is run within the batchPool context
     private void publishNow() {
 
-        stats();
-
         // cancel scheduled publish
         cancelScheduledPublish();
 
@@ -220,8 +218,8 @@ public class BatchWriter {
                     errorCount += finalUserRecordBatchCount;
                     errorRate.mark(finalUserRecordBatchCount);
                 } finally {
+                    --busy;
                     synchronized(busyCond) {
-                        --busy;
                         busyCond.notifyAll();
                     }
                     stats();
@@ -236,8 +234,10 @@ public class BatchWriter {
         } catch (Exception e) {
             throw new RuntimeException(e);
         } finally {
+
             // reschedule scheduled publish
             schedulePublish();
+
         }
 
     }
@@ -259,7 +259,7 @@ public class BatchWriter {
                 rate=Integer.parseInt(args[0]);
             System.out.println("rate:"+rate);
             final RateLimiter rateLimiter = RateLimiter.create(rate); // per second
-            for (int i = 0; i < 30*rate ; ++i) {
+            for (int i = 0; i < 50*rate ; ++i) {
                 JsonObject userRecord = new JsonObject();
                 String key = Hashing.sha256().hashInt(i%rate).toString();
                 userRecord.addProperty("entityKey", key);
