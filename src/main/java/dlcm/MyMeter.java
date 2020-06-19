@@ -1,36 +1,42 @@
 package dlcm;
 
 import java.util.*;
+import java.util.concurrent.*;
 
 class MyMeter {
 
-  private final long periodSeconds;
-  private final NavigableMap<Long, Long> values = new TreeMap<>();
+  private long sum;
+  private final NavigableMap<Long, Long> values = new ConcurrentSkipListMap<>();
 
-  public MyMeter(long periodSeconds) {
-    this.periodSeconds = periodSeconds;
+  private long now() {
+    long now = System.currentTimeMillis() / 1000;
+    // now /= 5;
+    // now *= 5;
+    return now;
   }
 
   public void mark(long value) {
-    synchronized(this) {
-      long now = System.currentTimeMillis()/1000;
-      values.put(now, values.getOrDefault(now, 0L)+value);
-      }
+    long now = now();
+    sum += value;
+    values.put(now, values.getOrDefault(now, 0L) + value);
   }
 
   public long sum() {
-    synchronized(this) {
-      long now = System.currentTimeMillis()/1000;
-      long fromKey = now - periodSeconds;
-      long toKey = now;
-      long sum = 0;
-      for (long value : values.subMap(fromKey, true, toKey, false).values())
-        sum += value;
-      return sum;
-    }
+    return sum;
   }
 
-  public long average() {
-    return sum()/periodSeconds;
+  private long sum(long periodSeconds) {
+    long now = now();
+    long fromKey = now - periodSeconds;
+    long toKey = now;
+    long sum = 0;
+    for (long value : values.subMap(fromKey, true, toKey, false).values())
+      sum += value;
+    return sum;
   }
+
+  public long average(long periodSeconds) {
+    return sum(periodSeconds) / periodSeconds;
+  }
+
 }

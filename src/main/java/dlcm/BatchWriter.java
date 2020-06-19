@@ -62,13 +62,14 @@ public class BatchWriter {
 
     private final String topicArn = "arn:aws:sns:us-east-2:743203956339:DlcmStack-InputEventTopicC39C99C1-QBIUZXL0AN";
 
-    private long requestCount;
-    private long confirmCount;
-    private long errorCount;
+    // private long requestCount;
+    // private long confirmCount;
+    // private long errorCount;
 
-    private final MyMeter requestRate = new MyMeter(5);
-    private final MyMeter confirmRate = new MyMeter(5);
-    private final MyMeter errorRate = new MyMeter(5);
+    private final long periodSeconds = 5;
+    private final MyMeter requestRate = new MyMeter();
+    private final MyMeter confirmRate = new MyMeter();
+    private final MyMeter errorRate = new MyMeter();
 
     /**
      * ctor
@@ -120,7 +121,7 @@ public class BatchWriter {
      * addUserRecord
      */
     public void addUserRecord(JsonElement jsonElement) {
-        ++requestCount;
+        // ++requestCount;
         requestRate.mark(1);
 
         batchThread.execute(() -> {
@@ -211,11 +212,11 @@ public class BatchWriter {
                     PublishResponse publishResponse = listenableFuture.get();
                     trace(publishResponse);
 
-                    confirmCount += finalUserRecordBatchCount;
+                    // confirmCount += finalUserRecordBatchCount;
                     confirmRate.mark(finalUserRecordBatchCount);
                 } catch (Exception e) {
                     log(e);
-                    errorCount += finalUserRecordBatchCount;
+                    // errorCount += finalUserRecordBatchCount;
                     errorRate.mark(finalUserRecordBatchCount);
                 } finally {
                     --busy;
@@ -286,9 +287,9 @@ public class BatchWriter {
 
     private void stats() {
         log(
-            String.format("request=%s/%s", requestRate.average(), requestCount),
-            String.format("success=%s/%s", confirmRate.average(), confirmCount),
-            String.format("failure=%s/%s", errorRate.average(), errorCount),
+            String.format("request=%s/%s", requestRate.average(periodSeconds), requestRate.sum()),
+            String.format("success=%s/%s", confirmRate.average(periodSeconds), confirmRate.sum()),
+            String.format("failure=%s/%s", errorRate.average(periodSeconds), errorRate.sum()),
             // "errorCount", errorCount
             ""
             );

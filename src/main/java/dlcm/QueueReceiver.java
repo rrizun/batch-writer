@@ -53,9 +53,10 @@ public class QueueReceiver {
   private final SqsAsyncClient sqs = SqsAsyncClient.create();
   private final ExecutorService executor = Executors.newSingleThreadExecutor();
 
-  private final MyMeter receiveRate = new MyMeter(5);
-  private final MyMeter deleteRate = new MyMeter(5);
-  private final MyMeter errorRate = new MyMeter(5);
+  private final long periodSeconds = 5;
+  private final MyMeter receiveRate = new MyMeter();
+  private final MyMeter deleteRate = new MyMeter();
+  private final MyMeter errorRate = new MyMeter();
 
   private long receiveCount;
   private long deleteCount;
@@ -205,9 +206,9 @@ public class QueueReceiver {
 
   private void stats(int i) {
     log(
-        String.format("receive=%s/%s", receiveRate.average(), receiveCount),
-        String.format("delete=%s/%s", deleteRate.average(), deleteCount),
-        String.format("error=%s/%s", errorRate.average(), errorCount),
+        String.format("receive=%s/%s", receiveRate.average(periodSeconds), receiveCount),
+        String.format("deleteSuccess=%s/%s", deleteRate.average(periodSeconds), deleteCount),
+        String.format("deleteFailure=%s/%s", errorRate.average(periodSeconds), errorCount),
         // "errorCount", errorCount
         String.format("[%s]", i)
         );
