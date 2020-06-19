@@ -205,15 +205,16 @@ public class BatchWriter {
                     PublishResponse publishResponse = listenableFuture.get();
                     trace(publishResponse);
                     successMeter.mark(finalUserRecordBatchCount);
+                    stats();
                 } catch (Exception e) {
                     log(e);
                     failureMeter.mark(finalUserRecordBatchCount);
+                    stats();
                 } finally {
                     --busy;
                     synchronized (busyCond) {
                         busyCond.notifyAll();
                     }
-                    stats();
                 }
             }, batchThread);
 
