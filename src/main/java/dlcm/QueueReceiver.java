@@ -34,11 +34,11 @@ class AwsNotification {
 public class QueueReceiver {
 
   public static void main(String... args) throws Exception {
-    new QueueReceiver();
+    new QueueReceiver("https://us-east-2.queue.amazonaws.com/743203956339/DlcmStack-InputEventQueueDB57F075-1PG9FW17QDZSN").start();
     Thread.sleep(Long.MAX_VALUE);
   }
 
-  private final String queueUrl = "https://us-east-2.queue.amazonaws.com/743203956339/DlcmStack-InputEventQueueDB57F075-1PG9FW17QDZSN";
+  private final String queueUrl;
 
   private final Executor executor = MoreExecutors.directExecutor();
   private final SqsAsyncClient sqs = SqsAsyncClient.create();
@@ -54,9 +54,12 @@ public class QueueReceiver {
    * 
    * @throws Exception
    */
-  public QueueReceiver() throws Exception {
+  public QueueReceiver(String queueUrl) throws Exception {
     log("ctor");
+    this.queueUrl = queueUrl;
+  }
 
+  public void start() {
     for (int i = 0; i < 4; ++i)
       doReceiveMessage();
 
@@ -67,7 +70,10 @@ public class QueueReceiver {
         log("averageReceiveRate/s", meter.average(), "errorCount", errorCount);
       }
     }, 0, 2000);
+  }
 
+  public void close() {
+    //###TODO
   }
 
   private void doReceiveMessage() {
@@ -76,7 +82,7 @@ public class QueueReceiver {
         //
         .queueUrl(queueUrl)
         // The maximum long polling wait time is 20 seconds
-        .waitTimeSeconds(2)
+        .waitTimeSeconds(20)
         //
         .build();
 
