@@ -8,15 +8,20 @@ repositories {
 dependencies {
 	implementation "com.google.code.gson:gson:+"
 	implementation "com.google.guava:guava:+"
+	implementation "com.spotify:futures-extra:+"
 	implementation 'com.codahale.metrics:metrics-core:+'
 
     // aws sdk 2
 	implementation platform("software.amazon.awssdk:bom:+")
 	implementation "software.amazon.awssdk:dynamodb"
+	implementation "software.amazon.awssdk:sns"
+	implementation "software.amazon.awssdk:sqs"
 
 	implementation "software.amazon.awssdk:apache-client"
 	implementation "software.amazon.awssdk:netty-nio-client"
 
 }
 
-mainClassName = "dlcm.Main"
+run {
+	mainClassName = System.getProperty("foo") ?: "dlcm.Main"
+}
