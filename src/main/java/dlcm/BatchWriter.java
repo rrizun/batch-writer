@@ -6,6 +6,8 @@ import java.io.OutputStream;
 import java.io.OutputStreamWriter;
 import java.time.Duration;
 import java.util.Random;
+import java.util.Timer;
+import java.util.TimerTask;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
@@ -70,6 +72,10 @@ public class BatchWriter {
 
     private final String topicArn = "arn:aws:sns:us-east-2:743203956339:DlcmStack-InputEventTopicC39C99C1-QBIUZXL0AN";
 
+    private final MyMeter requestRate = new MyMeter(5);
+    private final MyMeter confirmRate = new MyMeter(5);
+    private int errorCount;
+
     /**
      * ctor
      * 
@@ -78,8 +84,18 @@ public class BatchWriter {
      * @throws Exception
      */
     public BatchWriter(boolean compress, long lingerMs) throws Exception {
+        log("ctor");
         this.compress = compress;
         this.lingerMs = lingerMs;
+
+        //
+        new Timer().scheduleAtFixedRate(new TimerTask(){
+        @Override
+        public void run() {
+          log("requestRate/s", requestRate.average(), "confirmRate/s", confirmRate.average(), "errorCount", errorCount);
+        }
+      }, 0, 2000);
+  
     }
 
     public void start() throws Exception {
@@ -116,6 +132,7 @@ public class BatchWriter {
      * addUserRecord
      */
     public void addUserRecord(JsonElement jsonElement) {
+        requestRate.mark(1);
         batchThread.execute(() -> {
             try {
                 String jsonValue = jsonElement.toString();
@@ -158,118 +175,62 @@ public class BatchWriter {
     }
 
     // this is run within the batchPool context
-    private void publishNow() throws Exception {
+    private void publishNow() {
 
         // cancel scheduled publish
         cancelScheduledPublish();
 
-        // STEP 1 close
-        jsonWriter.close();
+        try {
 
-        // STEP 2 publish
-        String[] utf8 = new String[] { new String(baos.toByteArray()) };
-        if (compress) {
-            ByteArrayOutputStream tmp = new ByteArrayOutputStream();
-            try (OutputStream out = new GZIPOutputStream(tmp)) {
-                ByteStreams.copy(new ByteArrayInputStream(baos.toByteArray()), out);
+            // STEP 1 close
+            jsonWriter.close();
+
+            // STEP 2 publish
+            String[] utf8 = new String[] { new String(baos.toByteArray()) };
+            if (compress) {
+                ByteArrayOutputStream tmp = new ByteArrayOutputStream();
+                try (OutputStream out = new GZIPOutputStream(tmp)) {
+                    ByteStreams.copy(new ByteArrayInputStream(baos.toByteArray()), out);
+                }
+                utf8[0] = BaseEncoding.base64().encode(tmp.toByteArray());
             }
-            utf8[0] = BaseEncoding.base64().encode(tmp.toByteArray());
+            // log(baos.size(), utf8[0].length());
+
+            trace(utf8[0].length(), utf8[0].substring(0, Math.min(utf8[0].length(), 120)));
+
+            PublishRequest publishRequest = PublishRequest.builder()
+                //
+                .topicArn(topicArn)
+                //
+                .message(utf8[0])
+                //
+                .build();
+
+            trace(publishRequest.message().length());
+
+            ListenableFuture<PublishResponse> listenableFuture = lf(sns.publish(publishRequest));
+            listenableFuture.addListener(()->{
+                try {
+                    PublishResponse publishResponse = listenableFuture.get();
+                    trace(publishResponse);
+                } catch (Exception e) {
+                    log(e);
+                }
+            }, batchThread);
+
+            // STEP 3 start
+            baos.reset();
+            jsonWriter = new JsonWriter(new OutputStreamWriter(baos));
+
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        } finally {
+            // reschedule scheduled publish
+            schedulePublish();
         }
-        // log(baos.size(), utf8[0].length());
-
-
-        log(utf8[0].length(), utf8[0].substring(0, Math.min(utf8[0].length(), 120)));
-
-        PublishRequest publishRequest = PublishRequest.builder()
-        //
-        .topicArn(topicArn)
-        //
-        .message(utf8[0])
-        //
-        .build();
-
-        log(publishRequest.message().length());
-
-        ListenableFuture<PublishResponse> listenableFuture = lf(sns.publish(publishRequest));
-        listenableFuture.addListener(()->{
-            try {
-                PublishResponse publishResponse = listenableFuture.get();
-                log(publishResponse);
-            } catch (Exception e) {
-                log(e);
-                // e.printStackTrace();
-            }
-        }, batchThread);
-
-        // publishPool.execute(()->{
-
-        //     try {
-
-        //         // PublishResponse response =
-        //         sns.publish(publishRequest).whenComplete((a, b) -> {
-        //             log(a, b);
-        //             if (b!=null)
-        //                 b.printStackTrace();
-        //         });
-        //         // log(response);
-    
-        //         // //###TODO do actual sns publish here
-        //         // try {
-        //         // Thread.sleep(2000);
-        //         // } catch (Exception e) {
-        //         // throw new RuntimeException(e);
-        //         // }
-    
-        //     } catch (Exception e) {
-        //         e.printStackTrace();;
-        //     }
-
-        // });
-
-        // STEP 3 start
-        baos.reset();
-        jsonWriter = new JsonWriter(new OutputStreamWriter(baos));
-
-        // reschedule scheduled publish
-        schedulePublish();
 
     }
 
-    private void log(Object... args) {
-        new LogHelper(this).log(args);
-    }
- 
-//     Caused by: software.amazon.awssdk.core.exception.SdkClientException: Unable to execute HTTP request: Acquire operation took longer than the configured maximum time. This indicates that a request cannot get a connection from the pool within the specified maximum time. This can be due to high request rate.
-// Consider taking any of the following actions to mitigate the issue: increase max connections, increase acquire timeout, or slowing the request rate.
-// Increasing the max connections can increase client throughput (unless the network interface is already fully utilized), but can eventually start to hit operation system limitations on the number of file descriptors used by the process. If you already are fully utilizing your network interface or cannot further increase your connection count, increasing the acquire timeout gives extra time for requests to acquire a connection before timing out. If the connections doesn't free up, the subsequent requests will still timeout.
-// If the above mechanisms are not able to fix the issue, try smoothing out your requests so that large traffic bursts cannot overload the client, being more efficient with the number of times you need to call AWS, or by increasing the number of hosts sending requests.
-//         at software.amazon.awssdk.core.exception.SdkClientException$BuilderImpl.build(SdkClientException.java:98)
-//         at software.amazon.awssdk.core.exception.SdkClientException.create(SdkClientException.java:43)
-//         at software.amazon.awssdk.core.internal.http.pipeline.stages.utils.RetryableStageHelper.setLastException(RetryableStageHelper.java:199)
-//         at software.amazon.awssdk.core.internal.http.pipeline.stages.AsyncRetryableStage$RetryingExecutor.maybeRetryExecute(AsyncRetryableStage.java:143)
-//         ... 18 more
-
-    /**
-     * Acquire operation took longer than the configured maximum time. This
-     * indicates that a request cannot get a connection from the pool within the
-     * specified maximum time. This can be due to high request rate. Consider taking
-     * any of the following actions to mitigate the issue: increase max connections,
-     * increase acquire timeout, or slowing the request rate. Increasing the max
-     * connections can increase client throughput (unless the network interface is
-     * already fully utilized), but can eventually start to hit operation system
-     * limitations on the number of file descriptors used by the process. If you
-     * already are fully utilizing your network interface or cannot further increase
-     * your connection count, increasing the acquire timeout gives extra time for
-     * requests to acquire a connection before timing out. If the connections
-     * doesn't free up, the subsequent requests will still timeout. If the above
-     * mechanisms are not able to fix the issue, try smoothing out your requests so
-     * that large traffic bursts cannot overload the client, being more efficient
-     * with the number of times you need to call AWS, or by increasing the number of
-     * hosts sending requests.
-     * 
-     * @param args
-     * @throws Exception
-     */
     public static void main(String... args) throws Exception {
 
         // en0:        1693.58 KB/s         2863.68 KB/s         4557.27 KB/s
@@ -311,6 +272,14 @@ public class BatchWriter {
 
     private <T> ListenableFuture<T> lf(CompletableFuture<T> cf) {
         return CompletableFuturesExtra.toListenableFuture(cf);
-      }
-    
+    }
+
+    private void log(Object... args) {
+        new LogHelper(this).log(args);
+    }
+
+    private void trace(Object... args) {
+        // new LogHelper(this).log(args);
+    }
+
 }

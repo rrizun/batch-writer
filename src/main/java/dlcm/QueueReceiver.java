@@ -1,5 +1,7 @@
 package dlcm;
 
+import java.util.Timer;
+import java.util.TimerTask;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 
@@ -45,6 +47,7 @@ public class QueueReceiver {
   // private final Meter meter = registry.meter("asdf");
   private final MyMeter meter = new MyMeter(5);
 
+  private int errorCount;
 
   /**
    * ctor
@@ -53,12 +56,22 @@ public class QueueReceiver {
    */
   public QueueReceiver() throws Exception {
     log("ctor");
+
     for (int i = 0; i < 4; ++i)
       doReceiveMessage();
+
+    //
+    new Timer().scheduleAtFixedRate(new TimerTask(){
+      @Override
+      public void run() {
+        log("averageReceiveRate/s", meter.average(), "errorCount", errorCount);
+      }
+    }, 0, 2000);
+
   }
 
   private void doReceiveMessage() {
-    log("doReceiveMessage");
+    trace("doReceiveMessage");
     ReceiveMessageRequest receiveMessageRequest = ReceiveMessageRequest.builder()
         //
         .queueUrl(queueUrl)
@@ -67,20 +80,18 @@ public class QueueReceiver {
         //
         .build();
 
-    log(receiveMessageRequest);
+    trace(receiveMessageRequest);
 
     ListenableFuture<ReceiveMessageResponse> listenableFuture = lf(sqs.receiveMessage(receiveMessageRequest));
     listenableFuture.addListener(()->{
       try {
         ReceiveMessageResponse receiveMessageResponse = listenableFuture.get();
 
-        // log("responseMetadata", receiveMessageResponse.responseMetadata());
-
-        log("meter", Double.valueOf(meter.average()).intValue());
+        trace("responseMetadata", receiveMessageResponse.responseMetadata());
 
         if (receiveMessageResponse.hasMessages()) {
           for (Message message : receiveMessageResponse.messages()) {
-            // log(message.;
+            trace(message.body().length());
 
             AwsNotification notification = new Gson().fromJson(message.body(), AwsNotification.class);
             JsonArray array = new Gson().fromJson(notification.Message, JsonArray.class);
@@ -94,12 +105,12 @@ public class QueueReceiver {
                 //
                 .build();
     
-            log(deleteMessageRequest);
     
             // DeleteMessageResponse deleteMessageResponse;
             
+            trace(deleteMessageRequest);
             lf(sqs.deleteMessage(deleteMessageRequest)).addListener(()->{
-              log("deleteMessage.listener");
+              trace("deleteMessage.listener");
               // log(deleteMessageResponse);
             }, executor);
     
@@ -107,8 +118,9 @@ public class QueueReceiver {
         }
     
       } catch (Exception e) {
+        ++errorCount;
         log(e);
-        e.printStackTrace();
+        // e.printStackTrace();
       } finally {
         doReceiveMessage();
       }
@@ -122,6 +134,10 @@ public class QueueReceiver {
 
   private void log(Object... args) {
     new LogHelper(this).log(args);
+  }
+
+  private void trace(Object... args) {
+    // new LogHelper(this).log(args);
   }
 
 }
