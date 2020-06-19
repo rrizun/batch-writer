@@ -53,10 +53,13 @@ public class QueueReceiver {
   private final SqsAsyncClient sqs = SqsAsyncClient.create();
   private final ExecutorService executor = Executors.newSingleThreadExecutor();
 
-  private final MyMeter responseRate = new MyMeter(5);
+  private final MyMeter receiveRate = new MyMeter(5);
+  private final MyMeter deleteRate = new MyMeter(5);
+  private final MyMeter errorRate = new MyMeter(5);
 
-  private int responseCount;
-  // private int errorCount;
+  private long receiveCount;
+  private long deleteCount;
+  private long errorCount;
 
   private boolean running;
 
@@ -136,15 +139,14 @@ public class QueueReceiver {
 
           if (receiveMessageResponse.hasMessages()) {
             for (Message message : receiveMessageResponse.messages()) {
-              // trace(message.body().length());
 
               AwsNotification notification = new Gson().fromJson(message.body(), AwsNotification.class);
               JsonArray array = new Gson().fromJson(notification.Message, JsonArray.class);
 
-              responseCount += array.size();
-              responseRate.mark(array.size());
-
               trace("receiveMessage", abbrev(array.toString()));
+
+              receiveCount += array.size();
+              receiveRate.mark(array.size());
 
               // ----------------------------------------------------------------------
               // deleteMessage
@@ -167,9 +169,13 @@ public class QueueReceiver {
                   DeleteMessageResponse deleteMessageResponse = deleteMessageResponseFuture.get();
                   trace(deleteMessageResponse);
 
+                  deleteCount += array.size();
+                  deleteRate.mark(array.size());
+
                 } catch (Exception e) {
                   log(e);
-                  // e.printStackTrace();
+                  errorCount += array.size();
+                  errorRate.mark(array.size());
                 } finally {
                   --busy;
                   synchronized (busyCond) {
@@ -183,7 +189,7 @@ public class QueueReceiver {
       
         } catch (Exception e) {
           log(e);
-          e.printStackTrace();
+          // e.printStackTrace();
         } finally {
           --busy;
           synchronized (busyCond) {
@@ -199,7 +205,9 @@ public class QueueReceiver {
 
   private void stats(int i) {
     log(
-        String.format("receive=%s/%s", responseRate.average(), responseCount),
+        String.format("receive=%s/%s", receiveRate.average(), receiveCount),
+        String.format("delete=%s/%s", deleteRate.average(), deleteCount),
+        String.format("error=%s/%s", errorRate.average(), errorCount),
         // "errorCount", errorCount
         String.format("[%s]", i)
         );
