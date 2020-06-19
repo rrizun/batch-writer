@@ -7,11 +7,23 @@ import com.google.common.hash.Hashing;
 import com.google.common.util.concurrent.FutureCallback;
 import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.RateLimiter;
+import com.google.gson.Gson;
 
 import org.checkerframework.checker.nullness.qual.Nullable;
 
 import helpers.LogHelper;
 import software.amazon.awssdk.services.dynamodb.model.AttributeValue;
+
+class MetaData {
+  public String entityKey;
+  public String entityType;
+  public long version;
+  public MetaData(String entityKey, String entityType, long version) {
+    this.entityKey= entityKey;
+    this.entityType = entityType;
+    this.version = version;
+  }
+}
 
 public class Main {
 
@@ -78,10 +90,18 @@ public class Main {
   }
 
   private Map<String, AttributeValue> createItem(int i) {
-    Map<String, AttributeValue> item = new HashMap<>();
     String key = Hashing.sha256().hashInt(i).toString();
-    item.put("key", AttributeValue.builder().s(key).build());
+    MetaData metaData = new MetaData(key, "/foo/bar/baz", System.currentTimeMillis());
+
+    Map<String, AttributeValue> item = new HashMap<>();
+    item.put("key", s(key));
+    item.put("value", s(new Gson().toJson(metaData)));
+    
     return item;
+  }
+
+  private AttributeValue s(String s) {
+    return AttributeValue.builder().s(s).build();
   }
   
   private void log(Object... args) {
