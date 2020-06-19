@@ -84,6 +84,7 @@ public class BatchWriter {
     }
 
     public void start() throws Exception {
+        log("start");
         batchThread.execute(() -> {
             try {
                 jsonWriter.beginArray();
@@ -98,6 +99,7 @@ public class BatchWriter {
     private final Object busyCond = new Object();
 
     public void close() throws Exception {
+        log("close");
         batchThread.execute(() -> {
             try {
                 jsonWriter.endArray();
@@ -110,7 +112,8 @@ public class BatchWriter {
             while (busy>0)
                 busyCond.wait();
         }
-        MoreExecutors.shutdownAndAwaitTermination(batchThread, Duration.ofMillis(Long.MAX_VALUE));
+        if (MoreExecutors.shutdownAndAwaitTermination(batchThread, Duration.ofMillis(Long.MAX_VALUE)))
+            sns.close();
     }
 
     /**
