@@ -63,7 +63,7 @@ public class QueueReceiver {
         //
         .queueUrl(queueUrl)
         // The maximum long polling wait time is 20 seconds
-        .waitTimeSeconds(20)
+        .waitTimeSeconds(2)
         //
         .build();
 
