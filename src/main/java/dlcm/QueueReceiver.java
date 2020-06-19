@@ -42,7 +42,7 @@ public class QueueReceiver {
     final QueueReceiver queueReceiver = new QueueReceiver("https://us-east-2.queue.amazonaws.com/743203956339/DlcmStack-InputEventQueueDB57F075-1PG9FW17QDZSN");
     try {
       queueReceiver.start();
-      Thread.sleep(5000);
+      Thread.sleep(Long.MAX_VALUE);
     } finally {
       queueReceiver.close();
     }
@@ -53,9 +53,10 @@ public class QueueReceiver {
   private final SqsAsyncClient sqs = SqsAsyncClient.create();
   private final ExecutorService executor = Executors.newSingleThreadExecutor();
 
-  private final MyMeter meter = new MyMeter(5);
+  private final MyMeter responseRate = new MyMeter(5);
 
-  private int errorCount;
+  private int responseCount;
+  // private int errorCount;
 
   private boolean running;
 
@@ -73,7 +74,7 @@ public class QueueReceiver {
     log("start");
     running = true;
     executor.execute(()->{
-      for (int i = 0; i < 4; ++i)
+      for (int i = 0; i < 16; ++i)
         doReceiveMessage(i);
     });
 
@@ -94,8 +95,6 @@ public class QueueReceiver {
 
     // signal
     running = false;
-    executor.execute(()->{
-    });
 
     // wait
     synchronized(busyCond) {
@@ -111,6 +110,11 @@ public class QueueReceiver {
   private void doReceiveMessage(int i) {
     trace("doReceiveMessage", i);
     if (running) {
+
+      // ----------------------------------------------------------------------
+      // receiveMessage
+      // ----------------------------------------------------------------------
+
       ReceiveMessageRequest receiveMessageRequest = ReceiveMessageRequest.builder()
       //
       .queueUrl(queueUrl)
@@ -123,6 +127,7 @@ public class QueueReceiver {
 
       ListenableFuture<ReceiveMessageResponse> listenableFuture = lf(sqs.receiveMessage(receiveMessageRequest));
       ++busy;
+      stats(i);
       listenableFuture.addListener(()->{
         try {
           ReceiveMessageResponse receiveMessageResponse = listenableFuture.get();
@@ -135,9 +140,15 @@ public class QueueReceiver {
 
               AwsNotification notification = new Gson().fromJson(message.body(), AwsNotification.class);
               JsonArray array = new Gson().fromJson(notification.Message, JsonArray.class);
-              meter.mark(array.size());
+
+              responseCount += array.size();
+              responseRate.mark(array.size());
 
               trace("receiveMessage", abbrev(array.toString()));
+
+              // ----------------------------------------------------------------------
+              // deleteMessage
+              // ----------------------------------------------------------------------
       
               DeleteMessageRequest deleteMessageRequest = DeleteMessageRequest.builder()
                   //
@@ -158,19 +169,19 @@ public class QueueReceiver {
 
                 } catch (Exception e) {
                   log(e);
-                  //###TODDO more error accounting here??
+                  // e.printStackTrace();
                 } finally {
                   --busy;
                   synchronized (busyCond) {
                     busyCond.notifyAll();
                   }
+                  stats(i);
                 }
               }, executor);
             }
           }
       
         } catch (Exception e) {
-          ++errorCount;
           log(e);
           e.printStackTrace();
         } finally {
@@ -180,12 +191,18 @@ public class QueueReceiver {
           }
           if (running) {
             doReceiveMessage(i);
-            executor.execute(()->{
-            });
           }
         }
       }, executor);
     }
+  }
+
+  private void stats(int i) {
+    log(
+        String.format("receive=%s/%s", responseRate.average(), responseCount),
+        // "errorCount", errorCount
+        String.format("[%s]", i)
+        );
   }
 
   private <T> ListenableFuture<T> lf(CompletableFuture<T> cf) {
@@ -203,7 +220,7 @@ public class QueueReceiver {
   }
 
   private void trace(Object... args) {
-    new LogHelper(this).log(args);
+    // new LogHelper(this).log(args);
   }
 
 }
