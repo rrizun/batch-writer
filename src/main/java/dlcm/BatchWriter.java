@@ -171,7 +171,7 @@ public class BatchWriter {
     }
 
     private void cancelScheduledPublish() {
-        scheduledPublishFuture.cancel(true);
+        scheduledPublishFuture.cancel(false);
     }
 
     // this is run within the batchPool context
@@ -244,6 +244,9 @@ public class BatchWriter {
             topicWriter.start();
 
             int rate = 7500;
+            if (args.length>0)
+                rate=Integer.parseInt(args[0]);
+            System.out.println("rate:"+rate);
             final RateLimiter rateLimiter = RateLimiter.create(rate); // per second
             for (int i = 0; i < 3600*rate ; ++i) {
                 JsonObject userRecord = new JsonObject();
