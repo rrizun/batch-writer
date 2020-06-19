@@ -54,13 +54,9 @@ public class QueueReceiver {
   private final ExecutorService executor = Executors.newSingleThreadExecutor();
 
   private final long periodSeconds = 5;
-  private final MyMeter receiveRate = new MyMeter();
-  private final MyMeter deleteRate = new MyMeter();
-  private final MyMeter errorRate = new MyMeter();
-
-  private long receiveCount;
-  private long deleteCount;
-  private long errorCount;
+  private final MyMeter receiveMeter = new MyMeter();
+  private final MyMeter successMeter = new MyMeter();
+  private final MyMeter failureMeter = new MyMeter();
 
   private boolean running;
 
@@ -81,14 +77,6 @@ public class QueueReceiver {
       for (int i = 0; i < 16; ++i)
         doReceiveMessage(i);
     });
-
-    //
-    // new Timer().scheduleAtFixedRate(new TimerTask(){
-    //   @Override
-    //   public void run() {
-    //     log("averageReceiveRate/s", meter.average(), "errorCount", errorCount);
-    //   }
-    // }, 0, 2000);
   }
 
   private int busy;
@@ -142,12 +130,11 @@ public class QueueReceiver {
             for (Message message : receiveMessageResponse.messages()) {
 
               AwsNotification notification = new Gson().fromJson(message.body(), AwsNotification.class);
-              JsonArray array = new Gson().fromJson(notification.Message, JsonArray.class);
+              JsonArray jsonArray = new Gson().fromJson(notification.Message, JsonArray.class);
 
-              trace("receiveMessage", abbrev(array.toString()));
+              trace("receiveMessage", abbrev(jsonArray.toString()));
 
-              receiveCount += array.size();
-              receiveRate.mark(array.size());
+              receiveMeter.mark(jsonArray.size());
 
               // ----------------------------------------------------------------------
               // deleteMessage
@@ -169,14 +156,10 @@ public class QueueReceiver {
                 try {
                   DeleteMessageResponse deleteMessageResponse = deleteMessageResponseFuture.get();
                   trace(deleteMessageResponse);
-
-                  deleteCount += array.size();
-                  deleteRate.mark(array.size());
-
+                  successMeter.mark(jsonArray.size());
                 } catch (Exception e) {
                   log(e);
-                  errorCount += array.size();
-                  errorRate.mark(array.size());
+                  failureMeter.mark(jsonArray.size());
                 } finally {
                   --busy;
                   synchronized (busyCond) {
@@ -205,13 +188,7 @@ public class QueueReceiver {
   }
 
   private void stats(int i) {
-    log(
-        String.format("receive=%s/%s", receiveRate.average(periodSeconds), receiveCount),
-        String.format("deleteSuccess=%s/%s", deleteRate.average(periodSeconds), deleteCount),
-        String.format("deleteFailure=%s/%s", errorRate.average(periodSeconds), errorCount),
-        // "errorCount", errorCount
-        String.format("[%s]", i)
-        );
+    log("receive", receiveMeter, "success", successMeter, "failure", failureMeter);
   }
 
   private <T> ListenableFuture<T> lf(CompletableFuture<T> cf) {

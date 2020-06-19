@@ -41,35 +41,30 @@ public class BatchWriter {
     // batch thread state
     private ByteArrayOutputStream baos = new ByteArrayOutputStream();
     private JsonWriter jsonWriter = new JsonWriter(new OutputStreamWriter(baos));
-    private int userRecordBatchCount;
+    private int userRecordBatchCount; // number of 'app level' messages written to jsonWriter so far
     private ScheduledFuture<?> scheduledPublishFuture;
 
     // private static final int DEFAULT_MAX_CONNECTIONS = 50;
     // private static final int DEFAULT_MAX_CONNECTION_ACQUIRES = 10_000;
 
     private final NettyNioAsyncHttpClient.Builder httpClientBuilder = NettyNioAsyncHttpClient.builder()
-            //
-            // .maxConcurrency(250)
+    //
+    // .maxConcurrency(250)
     //
     ;
 
     private final SnsAsyncClient sns = SnsAsyncClient.builder()
     //
     // .httpClientBuilder(httpClientBuilder)
-    
     //
     .build();
 
     private final String topicArn = "arn:aws:sns:us-east-2:743203956339:DlcmStack-InputEventTopicC39C99C1-QBIUZXL0AN";
 
-    // private long requestCount;
-    // private long confirmCount;
-    // private long errorCount;
-
     private final long periodSeconds = 5;
-    private final MyMeter requestRate = new MyMeter();
-    private final MyMeter confirmRate = new MyMeter();
-    private final MyMeter errorRate = new MyMeter();
+    private final MyMeter requestMeter = new MyMeter();
+    private final MyMeter successMeter = new MyMeter();
+    private final MyMeter failureMeter = new MyMeter();
 
     /**
      * ctor
@@ -109,8 +104,8 @@ public class BatchWriter {
                 throw new RuntimeException(e);
             }
         });
-        synchronized(busyCond) {
-            while (busy>0)
+        synchronized (busyCond) {
+            while (busy > 0)
                 busyCond.wait();
         }
         if (MoreExecutors.shutdownAndAwaitTermination(batchThread, Duration.ofMillis(Long.MAX_VALUE)))
@@ -121,9 +116,7 @@ public class BatchWriter {
      * addUserRecord
      */
     public void addUserRecord(JsonElement jsonElement) {
-        // ++requestCount;
-        requestRate.mark(1);
-
+        requestMeter.mark(1);
         batchThread.execute(() -> {
             try {
                 String jsonValue = jsonElement.toString();
@@ -211,16 +204,13 @@ public class BatchWriter {
                 try {
                     PublishResponse publishResponse = listenableFuture.get();
                     trace(publishResponse);
-
-                    // confirmCount += finalUserRecordBatchCount;
-                    confirmRate.mark(finalUserRecordBatchCount);
+                    successMeter.mark(finalUserRecordBatchCount);
                 } catch (Exception e) {
                     log(e);
-                    // errorCount += finalUserRecordBatchCount;
-                    errorRate.mark(finalUserRecordBatchCount);
+                    failureMeter.mark(finalUserRecordBatchCount);
                 } finally {
                     --busy;
-                    synchronized(busyCond) {
+                    synchronized (busyCond) {
                         busyCond.notifyAll();
                     }
                     stats();
@@ -286,13 +276,7 @@ public class BatchWriter {
     }
 
     private void stats() {
-        log(
-            String.format("request=%s/%s", requestRate.average(periodSeconds), requestRate.sum()),
-            String.format("success=%s/%s", confirmRate.average(periodSeconds), confirmRate.sum()),
-            String.format("failure=%s/%s", errorRate.average(periodSeconds), errorRate.sum()),
-            // "errorCount", errorCount
-            ""
-            );
+        log("request", requestMeter, "success", successMeter, "failure", failureMeter);
     }
 
     private <T> ListenableFuture<T> lf(CompletableFuture<T> cf) {

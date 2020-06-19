@@ -39,4 +39,9 @@ class MyMeter {
     return sum(periodSeconds) / periodSeconds;
   }
 
+  public String toString() {
+    return String.format("%s/%s", average(5), sum());
+    // return String.format("%s[%s/%s/%s]%s", average(5), average(60), average(300), average(900), sum());
+  }
+
 }
