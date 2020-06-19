@@ -174,15 +174,12 @@ public class QueueReceiver {
       
         } catch (Exception e) {
           log(e);
-          // e.printStackTrace();
         } finally {
           --busy;
           synchronized (busyCond) {
             busyCond.notifyAll();
           }
-          if (running) {
-            doReceiveMessage(i);
-          }
+          doReceiveMessage(i);
         }
       }, executor);
     }
