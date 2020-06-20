@@ -256,10 +256,6 @@ public class BatchWriter {
         int cores = Runtime.getRuntime().availableProcessors();
         System.out.println("cores="+cores);
 
-        final BatchWriter topicWriter = new BatchWriter(false, 2000);
-        System.out.println("start");
-        topicWriter.start();
-
         final ExecutorService executor = Executors.newCachedThreadPool();
         for (int core = 0; core < cores; ++core) {
             executor.execute(()->{
@@ -268,6 +264,11 @@ public class BatchWriter {
 
                 try {
         
+                    final BatchWriter topicWriter = new BatchWriter(false, 2000);
+                    System.out.println("start");
+                    topicWriter.start();
+            
+            
                     System.out.println("rate:" + rate);
                     final RateLimiter rateLimiter = RateLimiter.create(rate); // per second
         
@@ -306,6 +307,10 @@ public class BatchWriter {
                     // System.out.println("call flush.get[2]");
         
                     System.out.println((System.currentTimeMillis() - t0) + "ms");
+
+                    System.out.println("close[1]");
+                    topicWriter.close();
+                    System.out.println("close[2]");
         
                 } catch (Exception e) {
                     e.printStackTrace();
@@ -319,9 +324,6 @@ public class BatchWriter {
 
         MoreExecutors.shutdownAndAwaitTermination(executor, Duration.ofMillis(Long.MAX_VALUE));
 
-        System.out.println("close[1]");
-        topicWriter.close();
-        System.out.println("close[2]");
 
     }
 
