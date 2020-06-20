@@ -9,7 +9,7 @@ class MyMeter {
   private final NavigableMap<Long, Long> values = new ConcurrentSkipListMap<>();
 
   private long now() {
-    long now = System.currentTimeMillis() / 1000;
+    long now = System.currentTimeMillis();
     // now /= 5;
     // now *= 5;
     return now;
@@ -19,7 +19,7 @@ class MyMeter {
     long now = now();
     sum += value;
     values.put(now, values.getOrDefault(now, 0L) + value);
-    values.keySet().retainAll(values.tailMap(now - 900).keySet());
+    values.keySet().retainAll(values.tailMap(now - 900*1000).keySet());
   }
 
   public long sum() {
@@ -28,7 +28,7 @@ class MyMeter {
 
   private long sum(long periodSeconds) {
     long now = now();
-    long fromKey = now - periodSeconds;
+    long fromKey = now - periodSeconds*1000;
     long toKey = now;
     long sum = 0;
     for (long value : values.subMap(fromKey, true, toKey, false).values())

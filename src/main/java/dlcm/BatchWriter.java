@@ -160,7 +160,7 @@ public class BatchWriter {
     }
 
     private ListenableFuture<Void> publishNow() {
-        log("publishNow", userRecordFutures.get().size());
+        trace("publishNow", userRecordFutures.get().size());
         
         if (userRecordFutures.get().size()==0)
             return Futures.immediateVoidFuture();
@@ -260,16 +260,16 @@ public class BatchWriter {
                 System.out.println("start");
                 topicWriter.start();
     
-                final int rate = args.length > 0 ? Integer.parseInt(args[0]) : 17500;
+                final long rate = args.length > 0 ? Long.parseLong(args[0]) : 7500;
                 System.out.println("rate:" + rate);
                 final RateLimiter rateLimiter = RateLimiter.create(rate); // per second
     
                 List<ListenableFuture<Void>> sync = new CopyOnWriteArrayList<>();
-                for (int i = 0; i < 5 * rate; ++i) {
+                for (long i = 0; i < 25 * rate; ++i) {
                     executor.submit(()->{
                         int j = new Random().nextInt();
                         JsonObject userRecord = new JsonObject();
-                        String key = Hashing.sha256().hashInt(j % rate).toString();
+                        String key = Hashing.sha256().hashLong(j % rate).toString();
                         userRecord.addProperty("entityKey", key);
                         userRecord.addProperty("entityType", "/foo/bar/baz");
                         userRecord.addProperty("version", System.currentTimeMillis());
