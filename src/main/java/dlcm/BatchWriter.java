@@ -105,7 +105,7 @@ public class BatchWriter {
         log("close");
         synchronized (lock) {
             jsonWriter.endArray();
-            publishNow(); // does not block
+            sendBatchNow(); // does not block
             while (busy > 0)
                 lock.wait();
         }
@@ -118,7 +118,7 @@ public class BatchWriter {
             return new VoidFuture() {
                 {
                     jsonWriter.endArray();
-                    publishNow().addListener(() -> {
+                    sendBatchNow().addListener(() -> {
                         setVoid(); // set future result
                     }, MoreExecutors.directExecutor());
                     jsonWriter.beginArray();
@@ -128,9 +128,9 @@ public class BatchWriter {
     }
 
     /**
-     * addUserRecord
+     * addToBatch
      */
-    public ListenableFuture<Void> addUserRecord(JsonElement jsonElement) throws Exception {
+    public ListenableFuture<Void> addToBatch(JsonElement jsonElement) throws Exception {
         synchronized (lock) {
             return new VoidFuture(){
                 {
@@ -145,7 +145,7 @@ public class BatchWriter {
     
                         // yes- publish now
                         jsonWriter.endArray();
-                        publishNow(); // does not block
+                        sendBatchNow(); // does not block
                         jsonWriter.beginArray();
     
                     }
@@ -159,8 +159,8 @@ public class BatchWriter {
         }
     }
 
-    private ListenableFuture<Void> publishNow() {
-        trace("publishNow", userRecordFutures.get().size());
+    private ListenableFuture<Void> sendBatchNow() {
+        trace("sendBatchNow", userRecordFutures.get().size());
         
         // if (userRecordFutures.get().size()==0)
         //     return Futures.immediateVoidFuture();
@@ -261,7 +261,7 @@ public class BatchWriter {
             final RateLimiter rateLimiter = RateLimiter.create(rate); // per second
 
             List<ListenableFuture<Void>> sync = new CopyOnWriteArrayList<>();
-            long seconds = 3600;
+            long seconds = 25;
             for (long i = 0; i < seconds * rate; ++i) {
                 JsonObject userRecord = new JsonObject();
                 String key = Hashing.sha256().hashLong(i % rate).toString();
@@ -269,7 +269,7 @@ public class BatchWriter {
                 userRecord.addProperty("entityType", "/foo/bar/baz");
                 userRecord.addProperty("version", System.currentTimeMillis());
                 
-                ListenableFuture<Void> f = topicWriter.addUserRecord(userRecord);
+                ListenableFuture<Void> f = topicWriter.addToBatch(userRecord);
                 // sync.add(f);
 
                 // rate limit
