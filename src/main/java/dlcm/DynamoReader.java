@@ -62,8 +62,9 @@ public class DynamoReader {
       flush();
       while (busy > 0)
         lock.wait();
-    }
+      }
     dynamo.close();
+    log("allFutures", allFutures.size(), "workingBatch", workingBatch.get().size());
   }
 
   /**
@@ -92,7 +93,7 @@ public class DynamoReader {
    * @return
    */
   public ListenableFuture<Map<String, AttributeValue>> getItem(Map<String, AttributeValue> key) {
-    log("getItem", key);
+    trace("getItem", key);
     synchronized (lock) {
       return new GetItemFuture() {
         {
@@ -193,31 +194,42 @@ public class DynamoReader {
   }
 
   private void trace(Object... args) {
-    new LogHelper(this).log(args);
+    // new LogHelper(this).log(args);
   }
 
-  public static void main(String... args) throws Exception {
+  // public static void main(String... args) throws Exception {
 
-    final DynamoReader dynamoReader = new DynamoReader("DlcmStack-TableCD117FA1-10BX86V213J7Z");
-    dynamoReader.start();
-    try {
+  //   final long t0 = System.currentTimeMillis();
 
-      Map<String, AttributeValue> key = ImmutableMap.of("key",
-          AttributeValue.builder().s("00e3d448ba79ee31b68784fd3890233ccf82c88e118984e7e129b921e87d7172").build());
+  //   final DynamoReader dynamoReader = new DynamoReader("DlcmStack-TableCD117FA1-10BX86V213J7Z");
+  //   dynamoReader.start();
+  //   try {
 
-      ListenableFuture<Map<String, AttributeValue>> getItemFuture = dynamoReader.getItem(key);
+  //     Map<String, AttributeValue> key = ImmutableMap.of("key",
+  //         AttributeValue.builder().s("00e3d448ba79ee31b68784fd3890233ccf82c88e118984e7e129b921e87d7172").build());
+      
+  //     for (int i = 0; i < 5000; ++i) {
+  //       ListenableFuture<Map<String, AttributeValue>> future = dynamoReader.getItem(key);
+  //       future.addListener(()->{
+  //         try {
+  //           System.out.println(future.get());
+  //         } catch (Exception e) {
+  //           e.printStackTrace();
+  //         }
+  //       }, MoreExecutors.directExecutor());
+  //     }
 
-      dynamoReader.flush().get();
+  //   } catch (Exception e) {
+  //     e.printStackTrace();
+  //   } finally {
+  //     System.out.println("close[1]");
+  //     dynamoReader.close();
+  //     System.out.println("close[2]");
 
-      System.out.println(getItemFuture.get());
-      // getItemFuture.addListener(()->{
-      // }, MoreExecutors.directExecutor());
+  //     log(System.currentTimeMillis()-t0, "ms");
+  //   }
 
-    } catch (Exception e) {
-      e.printStackTrace();
-    } finally {
-      dynamoReader.close();
-    }
+  // }
 
-  }
+
 }
