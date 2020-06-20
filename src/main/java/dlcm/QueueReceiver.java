@@ -70,10 +70,11 @@ public class QueueReceiver {
   }
 
   public void start() {
-    log("start");
+    int cores = Runtime.getRuntime().availableProcessors();
+    log("start", cores);
     synchronized(lock) {
       running = true;
-      for (int i = 0; i < Runtime.getRuntime().availableProcessors(); ++i)
+      for (int i = 0; i < cores; ++i)
         doReceiveMessage(i);
     }
   }
