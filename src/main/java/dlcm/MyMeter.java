@@ -19,6 +19,7 @@ class MyMeter {
     long now = now();
     sum += value;
     values.put(now, values.getOrDefault(now, 0L) + value);
+    values.keySet().retainAll(values.tailMap(now - 900).keySet());
   }
 
   public long sum() {
