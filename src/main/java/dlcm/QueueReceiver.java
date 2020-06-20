@@ -73,7 +73,7 @@ public class QueueReceiver {
     log("start");
     synchronized(lock) {
       running = true;
-      for (int i = 0; i < 16; ++i)
+      for (int i = 0; i < Runtime.getRuntime().availableProcessors(); ++i)
         doReceiveMessage(i);
     }
   }
@@ -96,6 +96,7 @@ public class QueueReceiver {
     }
   }
 
+  // must be locked
   private void doReceiveMessage(int i) {
     trace("doReceiveMessage", running, i);
     if (running) {
