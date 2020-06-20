@@ -300,14 +300,15 @@ public class BatchWriter {
             // topicWriter.flush().get();
             // System.out.println("call flush.get[2]");
 
+            System.out.println((System.currentTimeMillis() - t0) + "ms");
+
         } finally {
             System.out.println("close[1]");
             topicWriter.close();
             System.out.println("close[2]");
-        }
 
-        // finish time
-        System.out.println((System.currentTimeMillis() - t0) + "ms");
+            System.out.println((System.currentTimeMillis() - t0) + "ms");
+        }
 
     }
 
