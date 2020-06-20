@@ -50,8 +50,7 @@ public class QueueReceiver {
 
   private final String queueUrl;
 
-  private final SqsAsyncClient sqs = SqsAsyncClient.create();
-  private final ExecutorService executor = Executors.newSingleThreadExecutor();
+  private final SqsAsyncClient sqsClient = SqsAsyncClient.create();
 
   private final long periodSeconds = 5;
   private final MyMeter receiveMeter = new MyMeter();
@@ -72,35 +71,33 @@ public class QueueReceiver {
 
   public void start() {
     log("start");
-    running = true;
-    executor.execute(()->{
+    synchronized(lock) {
+      running = true;
       for (int i = 0; i < 16; ++i)
         doReceiveMessage(i);
-    });
+    }
   }
 
   private int busy;
-  private final Object busyCond = new Object();
+  private final Object lock = new Object();
 
   public void close() throws Exception {
     log("close");
+    synchronized (lock) {
+      // signal
+      running = false;
 
-    // signal
-    running = false;
+      // wait
+      while (busy > 0)
+        lock.wait();
 
-    // wait
-    synchronized(busyCond) {
-      while (busy>0)
-        busyCond.wait();
+        // close
+      sqsClient.close();
     }
-
-    // close
-    if (MoreExecutors.shutdownAndAwaitTermination(executor, Duration.ofMillis(Long.MAX_VALUE)))
-      sqs.close();
   }
 
   private void doReceiveMessage(int i) {
-    trace("doReceiveMessage", i);
+    trace("doReceiveMessage", running, i);
     if (running) {
 
       // ----------------------------------------------------------------------
@@ -117,71 +114,72 @@ public class QueueReceiver {
 
       trace(receiveMessageRequest);
 
-      ListenableFuture<ReceiveMessageResponse> listenableFuture = lf(sqs.receiveMessage(receiveMessageRequest));
-      stats(i);
+      ListenableFuture<ReceiveMessageResponse> listenableFuture = lf(sqsClient.receiveMessage(receiveMessageRequest));
+      // stats(i);
       ++busy;
       listenableFuture.addListener(()->{
-        try {
-          ReceiveMessageResponse receiveMessageResponse = listenableFuture.get();
-
-          trace(abbrev(receiveMessageResponse.toString()));
-
-          if (receiveMessageResponse.hasMessages()) {
-            for (Message message : receiveMessageResponse.messages()) {
-
-              AwsNotification notification = new Gson().fromJson(message.body(), AwsNotification.class);
-              JsonArray jsonArray = new Gson().fromJson(notification.Message, JsonArray.class);
-
-              trace("receiveMessage", abbrev(jsonArray.toString()));
-
-              receiveMeter.mark(jsonArray.size());
-
-              // ----------------------------------------------------------------------
-              // deleteMessage
-              // ----------------------------------------------------------------------
-      
-              DeleteMessageRequest deleteMessageRequest = DeleteMessageRequest.builder()
-                  //
-                  .queueUrl(queueUrl)
-                  //
-                  .receiptHandle(message.receiptHandle())
-                  //
-                  .build();
-
-              trace(deleteMessageRequest);
-
-              ListenableFuture<DeleteMessageResponse> deleteMessageResponseFuture = lf(sqs.deleteMessage(deleteMessageRequest));
-              ++busy;
-              deleteMessageResponseFuture.addListener(()->{
-                try {
-                  DeleteMessageResponse deleteMessageResponse = deleteMessageResponseFuture.get();
-                  trace(deleteMessageResponse);
-                  successMeter.mark(jsonArray.size());
-                  stats(i);
-                } catch (Exception e) {
-                  log(e);
-                  failureMeter.mark(jsonArray.size());
-                  stats(i);
-                } finally {
-                  --busy;
-                  synchronized (busyCond) {
-                    busyCond.notifyAll();
+        synchronized (lock) {
+          try {
+            ReceiveMessageResponse receiveMessageResponse = listenableFuture.get();
+  
+            trace(abbrev(receiveMessageResponse.toString()));
+  
+            if (receiveMessageResponse.hasMessages()) {
+              for (Message message : receiveMessageResponse.messages()) {
+  
+                AwsNotification notification = new Gson().fromJson(message.body(), AwsNotification.class);
+                JsonArray jsonArray = new Gson().fromJson(notification.Message, JsonArray.class);
+  
+                trace("receiveMessage", abbrev(jsonArray.toString()));
+  
+                receiveMeter.mark(jsonArray.size());
+                stats(i);
+  
+                // ----------------------------------------------------------------------
+                // deleteMessage
+                // ----------------------------------------------------------------------
+        
+                DeleteMessageRequest deleteMessageRequest = DeleteMessageRequest.builder()
+                    //
+                    .queueUrl(queueUrl)
+                    //
+                    .receiptHandle(message.receiptHandle())
+                    //
+                    .build();
+  
+                trace(deleteMessageRequest);
+  
+                ListenableFuture<DeleteMessageResponse> deleteMessageResponseFuture = lf(sqsClient.deleteMessage(deleteMessageRequest));
+                ++busy;
+                deleteMessageResponseFuture.addListener(()->{
+                  synchronized (lock) {
+                    try {
+                      DeleteMessageResponse deleteMessageResponse = deleteMessageResponseFuture.get();
+                      trace(deleteMessageResponse);
+                      successMeter.mark(jsonArray.size());
+                      stats(i);
+                    } catch (Exception e) {
+                      log(e);
+                      failureMeter.mark(jsonArray.size());
+                      stats(i);
+                    } finally {
+                      --busy;
+                      lock.notifyAll();
+                    }
                   }
-                }
-              }, executor);
+                }, MoreExecutors.directExecutor());
+              }
             }
+        
+          } catch (Exception e) {
+            log(e); //###TODO SET A FUTURE HERE???
+          } finally {
+            --busy;
+            lock.notifyAll();
+            doReceiveMessage(i);
           }
-      
-        } catch (Exception e) {
-          log(e);
-        } finally {
-          --busy;
-          synchronized (busyCond) {
-            busyCond.notifyAll();
-          }
-          doReceiveMessage(i);
         }
-      }, executor);
+      }, MoreExecutors.directExecutor());
     }
   }
 
