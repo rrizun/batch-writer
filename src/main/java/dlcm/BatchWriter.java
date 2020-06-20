@@ -63,10 +63,10 @@ public class BatchWriter {
 
     private ByteArrayOutputStream baos = new ByteArrayOutputStream();
     private JsonWriter jsonWriter = new JsonWriter(new OutputStreamWriter(baos));
-    private final AtomicReference<Set<Long>> userRecordFutures = new AtomicReference<>(new HashSet<>());
 
     private long nextFutureId;
     private final Map<Long, VoidFuture> allFutures = new HashMap<>();
+    private final AtomicReference<Set<Long>> workingBatch = new AtomicReference<>(new HashSet<>());
 
     // private static final int DEFAULT_MAX_CONNECTIONS = 50;
     // private static final int DEFAULT_MAX_CONNECTION_ACQUIRES = 10_000;
@@ -127,10 +127,7 @@ public class BatchWriter {
             return new VoidFuture() {
                 {
                     jsonWriter.endArray();
-                    sendBatchNow().addListener(() -> {
-                        // setVoid(); // set future result
-                    }, MoreExecutors.directExecutor());
-
+                    sendBatchNow();
                     Futures.allAsList(allFutures.values()).addListener(()->{
                         setVoid(); // set future result
                     }, MoreExecutors.directExecutor());
@@ -167,95 +164,85 @@ public class BatchWriter {
                     jsonWriter.flush();
 
                     long id = ++nextFutureId;
-                    userRecordFutures.get().add(id); // add to batch
+                    workingBatch.get().add(id); // add to batch
                     allFutures.put(id, this); // save this future result
                 }
             };
         }
     }
 
-    private ListenableFuture<Void> sendBatchNow() {
-        trace("sendBatchNow", userRecordFutures.get().size());
+    private void sendBatchNow() throws Exception {
+        trace("sendBatchNow", workingBatch.get().size());
 
         // if (userRecordFutures.get().size()==0)
         // return Futures.immediateVoidFuture();
 
-        return new AbstractFuture<Void>() {
-            {
-                try {
+            // STEP 1 close batch
+            jsonWriter.close();
 
-                    // STEP 1 close batch
-                    jsonWriter.close();
-
-                    // STEP 2 publish
-                    String utf8 = new String(baos.toByteArray());
-                    if (compress) {
-                        ByteArrayOutputStream tmp = new ByteArrayOutputStream();
-                        try (OutputStream out = new GZIPOutputStream(tmp)) {
-                            ByteStreams.copy(new ByteArrayInputStream(baos.toByteArray()), out);
-                        }
-                        utf8 = BaseEncoding.base64().encode(tmp.toByteArray());
-                    }
-                    // log(baos.size(), utf8[0].length());
-
-                    trace(utf8.length(), utf8.substring(0, Math.min(utf8.length(), 120)));
-
-                    PublishRequest publishRequest = PublishRequest.builder()
-                            //
-                            .topicArn(topicArn)
-                            //
-                            .message(utf8)
-                            //
-                            .build();
-
-                    trace(publishRequest.message().length());
-
-                    // final int finalUserRecordBatchCount = userRecordBatchCount; // take snapshot
-                    final Set<Long> copy = userRecordFutures.getAndSet(new HashSet<>());
-                    // allFutures.putAll(copy);
-
-                    ListenableFuture<PublishResponse> listenableFuture = lf(snsClient.publish(publishRequest));
-
-                    requestMeter.mark(copy.size());
-                    stats("[>>>request>>>]");
-
-                    ++busy;
-                    listenableFuture.addListener(() -> {
-                        synchronized (lock) {
-                            try {
-                                PublishResponse publishResponse = listenableFuture.get();
-                                trace(publishResponse);
-                                successMeter.mark(copy.size());
-                                stats("[<<<success<<<]");
-                                for (Long futureId : copy) {
-                                    allFutures.remove(futureId).setVoid();
-                                }
-                            } catch (Exception e) {
-                                log(e);
-                                // e.printStackTrace();
-                                log("publishRequestMessageLength", publishRequest.message().length());
-                                failureMeter.mark(copy.size());
-                                stats("[<<<failure<<<]");
-                                for (Long futureId : copy) {
-                                    allFutures.remove(futureId).setException(e);
-                                }
-                            } finally {
-                                --busy;
-                                lock.notifyAll(); // signal
-                                set(Defaults.defaultValue(Void.class)); // set publishNow future result
-                            }
-                        }
-                    }, MoreExecutors.directExecutor());
-
-                    // STEP 3 start new batch
-                    baos.reset();
-                    jsonWriter = new JsonWriter(new OutputStreamWriter(baos));
-
-                } catch (Exception e) {
-                    setException(e); // set publishNow future exception
+            // STEP 2 publish
+            String utf8 = new String(baos.toByteArray());
+            if (compress) {
+                ByteArrayOutputStream tmp = new ByteArrayOutputStream();
+                try (OutputStream out = new GZIPOutputStream(tmp)) {
+                    ByteStreams.copy(new ByteArrayInputStream(baos.toByteArray()), out);
                 }
+                utf8 = BaseEncoding.base64().encode(tmp.toByteArray());
             }
-        };
+            // log(baos.size(), utf8[0].length());
+
+            trace(utf8.length(), utf8.substring(0, Math.min(utf8.length(), 120)));
+
+            PublishRequest publishRequest = PublishRequest.builder()
+                    //
+                    .topicArn(topicArn)
+                    //
+                    .message(utf8)
+                    //
+                    .build();
+
+            trace(publishRequest.message().length());
+
+            // final int finalUserRecordBatchCount = userRecordBatchCount; // take snapshot
+            final Set<Long> sentBatch = workingBatch.getAndSet(new HashSet<>());
+            // allFutures.putAll(copy);
+
+            ListenableFuture<PublishResponse> listenableFuture = lf(snsClient.publish(publishRequest));
+
+            requestMeter.mark(sentBatch.size());
+            stats("[>>>request>>>]");
+
+            ++busy;
+            listenableFuture.addListener(() -> {
+                synchronized (lock) {
+                    try {
+                        PublishResponse publishResponse = listenableFuture.get();
+                        trace(publishResponse);
+                        successMeter.mark(sentBatch.size());
+                        stats("[<<<success<<<]");
+                        for (Long futureId : sentBatch) {
+                            allFutures.remove(futureId).setVoid();
+                        }
+                    } catch (Exception e) {
+                        log(e);
+                        // e.printStackTrace();
+                        log("publishRequestMessageLength", publishRequest.message().length());
+                        failureMeter.mark(sentBatch.size());
+                        stats("[<<<failure<<<]");
+                        for (Long futureId : sentBatch) {
+                            allFutures.remove(futureId).setException(e);
+                        }
+                    } finally {
+                        --busy;
+                        lock.notifyAll(); // signal
+                    }
+                }
+            }, MoreExecutors.directExecutor());
+
+            // STEP 3 start new batch
+            baos.reset();
+            jsonWriter = new JsonWriter(new OutputStreamWriter(baos));
+
     }
 
     public static void main(String... args) throws Exception {
