@@ -4,19 +4,12 @@ import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.OutputStream;
 import java.io.OutputStreamWriter;
-import java.security.SecureRandom;
 import java.time.Duration;
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.List;
 import java.util.Map;
-import java.util.Random;
 import java.util.Set;
-import java.util.Map.Entry;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CopyOnWriteArrayList;
-import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicReference;
@@ -73,13 +66,13 @@ public class BatchWriter {
 
     private final NettyNioAsyncHttpClient.Builder httpClientBuilder = NettyNioAsyncHttpClient.builder()
     //
-    .maxConcurrency(250)
+    // .maxConcurrency(250)
     //
     ;
 
     private final SnsAsyncClient snsClient = SnsAsyncClient.builder()
             //
-            .httpClientBuilder(httpClientBuilder)
+            // .httpClientBuilder(httpClientBuilder)
             //
             .build();
 
