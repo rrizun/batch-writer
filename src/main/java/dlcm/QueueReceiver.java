@@ -38,14 +38,39 @@ class AwsNotification {
 
 public class QueueReceiver {
 
+
   public static void main(String... args) throws Exception {
-    final QueueReceiver queueReceiver = new QueueReceiver("https://us-east-2.queue.amazonaws.com/743203956339/DlcmStack-InputEventQueueDB57F075-1PG9FW17QDZSN");
-    try {
-      queueReceiver.start();
-      Thread.sleep(Long.MAX_VALUE);
-    } finally {
-      queueReceiver.close();
+    int cores = Runtime.getRuntime().availableProcessors();
+    final String queueUrl = "https://us-east-2.queue.amazonaws.com/743203956339/DlcmStack-InputEventQueueDB57F075-1PG9FW17QDZSN";
+    // final ExecutorService executor = Executors.newCachedThreadPool();
+    for (int core = 0; core < cores; ++core) {
+      new Thread() {
+        public void run() {
+
+          try {
+
+            final QueueReceiver queueReceiver = new QueueReceiver(queueUrl);
+            try {
+              queueReceiver.start();
+              Thread.sleep(Long.MAX_VALUE);
+            } finally {
+              queueReceiver.close();
+            }
+          } catch (Exception e) {
+
+          }
+
+        }
+      }.start();
     }
+
+    // final QueueReceiver queueReceiver = new QueueReceiver("https://us-east-2.queue.amazonaws.com/743203956339/DlcmStack-InputEventQueueDB57F075-1PG9FW17QDZSN");
+    // try {
+    //   queueReceiver.start();
+    //   Thread.sleep(Long.MAX_VALUE);
+    // } finally {
+    //   queueReceiver.close();
+    // }
   }
 
   private final String queueUrl;
@@ -71,6 +96,9 @@ public class QueueReceiver {
 
   public void start() {
     int cores = Runtime.getRuntime().availableProcessors();
+
+    cores = 1;
+
     log("start", cores);
     synchronized(lock) {
       running = true;
