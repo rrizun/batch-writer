@@ -249,66 +249,79 @@ public class BatchWriter {
 
         // start time
         final long t0 = System.currentTimeMillis();
+
+        final long seconds = 25;
+        final long aggRate = args.length > 0 ? Long.parseLong(args[0]) : 7500;
+
+        int cores = Runtime.getRuntime().availableProcessors();
+        System.out.println("cores="+cores);
+
         final BatchWriter topicWriter = new BatchWriter(false, 2000);
+        System.out.println("start");
+        topicWriter.start();
 
-        // topicWriter.start();
-        // topicWriter.flush().get();
-        // topicWriter.close();
-        // if (new Random().nextInt()!=0)
-        //     System.exit(0);
+        final ExecutorService executor = Executors.newCachedThreadPool();
+        for (int core = 0; core < cores; ++core) {
+            executor.execute(()->{
 
-        try {
-            System.out.println("start");
-            topicWriter.start();
+                long rate = aggRate/cores;
 
-            final long rate = args.length > 0 ? Long.parseLong(args[0]) : 7500;
-            System.out.println("rate:" + rate);
-            final RateLimiter rateLimiter = RateLimiter.create(rate); // per second
-
-            // List<ListenableFuture<Void>> sync = new CopyOnWriteArrayList<>();
-            long seconds = 25;
-            for (long i = 1; i <= seconds * rate; ++i) {
-                JsonObject userRecord = new JsonObject();
-                String key = Hashing.sha256().hashLong(i % rate).toString();
-
-                // byte[] bytes = new byte[new Random().nextInt(16)];
-                // new SecureRandom().nextBytes(bytes);
-                // key = BaseEncoding.base64().encode(bytes).toString();
-
-                userRecord.addProperty("entityKey", key);
-                userRecord.addProperty("entityType", "/foo/bar/baz");
-                userRecord.addProperty("version", System.currentTimeMillis());
-                
-                ListenableFuture<Void> f = topicWriter.addToBatch(userRecord);
-                // sync.add(f);
-
-                // rate limit
-                rateLimiter.acquire();
-
-                // periodic checkpoint
-                // if (i % (2*seconds) == 0)
-                // {
-                //     System.out.println("call flush.get[1]");
-                //     // topicWriter.flush();
-                //     System.out.println("call flush.get[2]");
-                //     // Futures.allAsList(sync).get();
-                //     // sync.clear();
-                // }
-            }
-
-            // System.out.println("call flush.get[1]");
-            // topicWriter.flush().get();
-            // System.out.println("call flush.get[2]");
-
-            System.out.println((System.currentTimeMillis() - t0) + "ms");
-
-        } finally {
-            System.out.println("close[1]");
-            topicWriter.close();
-            System.out.println("close[2]");
-
-            System.out.println((System.currentTimeMillis() - t0) + "ms");
+                try {
+        
+                    System.out.println("rate:" + rate);
+                    final RateLimiter rateLimiter = RateLimiter.create(rate); // per second
+        
+                    // List<ListenableFuture<Void>> sync = new CopyOnWriteArrayList<>();
+                    for (long i = 1; i <= seconds * rate; ++i) {
+                        JsonObject userRecord = new JsonObject();
+                        String key = Hashing.sha256().hashLong(i % rate).toString();
+        
+                        // byte[] bytes = new byte[new Random().nextInt(16)];
+                        // new SecureRandom().nextBytes(bytes);
+                        // key = BaseEncoding.base64().encode(bytes).toString();
+        
+                        userRecord.addProperty("entityKey", key);
+                        userRecord.addProperty("entityType", "/foo/bar/baz");
+                        userRecord.addProperty("version", System.currentTimeMillis());
+                        
+                        ListenableFuture<Void> f = topicWriter.addToBatch(userRecord);
+                        // sync.add(f);
+        
+                        // rate limit
+                        rateLimiter.acquire();
+        
+                        // periodic checkpoint
+                        // if (i % (2*seconds) == 0)
+                        // {
+                        //     System.out.println("call flush.get[1]");
+                        //     // topicWriter.flush();
+                        //     System.out.println("call flush.get[2]");
+                        //     // Futures.allAsList(sync).get();
+                        //     // sync.clear();
+                        // }
+                    }
+        
+                    // System.out.println("call flush.get[1]");
+                    // topicWriter.flush().get();
+                    // System.out.println("call flush.get[2]");
+        
+                    System.out.println((System.currentTimeMillis() - t0) + "ms");
+        
+                } catch (Exception e) {
+                    e.printStackTrace();
+                } finally {
+        
+                    System.out.println((System.currentTimeMillis() - t0) + "ms");
+                }
+        
+            });
         }
+
+        MoreExecutors.shutdownAndAwaitTermination(executor, Duration.ofMillis(Long.MAX_VALUE));
+
+        System.out.println("close[1]");
+        topicWriter.close();
+        System.out.println("close[2]");
 
     }
 
