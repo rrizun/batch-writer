@@ -162,8 +162,8 @@ public class BatchWriter {
     private ListenableFuture<Void> publishNow() {
         trace("publishNow", userRecordFutures.get().size());
         
-        if (userRecordFutures.get().size()==0)
-            return Futures.immediateVoidFuture();
+        // if (userRecordFutures.get().size()==0)
+        //     return Futures.immediateVoidFuture();
         
         return new AbstractFuture<Void>() {
             {
@@ -215,6 +215,7 @@ public class BatchWriter {
                                     future.setVoid();
                             } catch (Exception e) {
                                 log(e);
+                                e.printStackTrace();
                                 failureMeter.mark(copy.size());
                                 stats();
                                 for (VoidFuture future : copy)
@@ -241,63 +242,59 @@ public class BatchWriter {
 
     public static void main(String... args) throws Exception {
 
-        // en0: 1693.58 KB/s 2863.68 KB/s 4557.27 KB/s
-
         // start time
         final long t0 = System.currentTimeMillis();
-        
-        //###TODO test multi-threaded writer here
-        //###TODO test multi-threaded writer here
-        //###TODO test multi-threaded writer here
-        //###TODO test multi-threaded writer here
-        //###TODO test multi-threaded writer here
+        final BatchWriter topicWriter = new BatchWriter(false, 2000);
 
-        final ExecutorService executor = Executors.newFixedThreadPool(20);
+        // topicWriter.start();
+        // topicWriter.flush().get();
+        // topicWriter.close();
+        // if (new Random().nextInt()!=0)
+        //     System.exit(0);
+
         try {
+            System.out.println("start");
+            topicWriter.start();
 
-            final BatchWriter topicWriter = new BatchWriter(false, 2000);
-            try {
-                System.out.println("start");
-                topicWriter.start();
-    
-                final long rate = args.length > 0 ? Long.parseLong(args[0]) : 7500;
-                System.out.println("rate:" + rate);
-                final RateLimiter rateLimiter = RateLimiter.create(rate); // per second
-    
-                List<ListenableFuture<Void>> sync = new CopyOnWriteArrayList<>();
-                for (long i = 0; i < 25 * rate; ++i) {
-                    executor.submit(()->{
-                        int j = new Random().nextInt();
-                        JsonObject userRecord = new JsonObject();
-                        String key = Hashing.sha256().hashLong(j % rate).toString();
-                        userRecord.addProperty("entityKey", key);
-                        userRecord.addProperty("entityType", "/foo/bar/baz");
-                        userRecord.addProperty("version", System.currentTimeMillis());
-                        sync.add(topicWriter.addUserRecord(userRecord));
-                        return Defaults.defaultValue(Void.class);
-                    });
-    
-                    // rate limit
-                    rateLimiter.acquire();
+            final long rate = args.length > 0 ? Long.parseLong(args[0]) : 7500;
+            System.out.println("rate:" + rate);
+            final RateLimiter rateLimiter = RateLimiter.create(rate); // per second
+
+            List<ListenableFuture<Void>> sync = new CopyOnWriteArrayList<>();
+            long seconds = 3600;
+            for (long i = 0; i < seconds * rate; ++i) {
+                JsonObject userRecord = new JsonObject();
+                String key = Hashing.sha256().hashLong(i % rate).toString();
+                userRecord.addProperty("entityKey", key);
+                userRecord.addProperty("entityType", "/foo/bar/baz");
+                userRecord.addProperty("version", System.currentTimeMillis());
+                
+                ListenableFuture<Void> f = topicWriter.addUserRecord(userRecord);
+                // sync.add(f);
+
+                // rate limit
+                rateLimiter.acquire();
+
+                // periodic checkpoint
+                if (i % (2*rate) == 0) {
+                    topicWriter.flush();
+                    Futures.allAsList(sync).get();
+                    sync.clear();
                 }
-
-                MoreExecutors.shutdownAndAwaitTermination(executor, Duration.ofMillis(Long.MAX_VALUE));
-    
-                System.out.println("call flush.get[1]");
-                topicWriter.flush();
-                System.out.println("call flush.get[2]");
-    
-                System.out.println("call sync.get[1]");
-                Futures.allAsList(sync).get();
-                System.out.println("call sync.get[2]");
-    
-            } finally {
-                System.out.println("close[1]");
-                topicWriter.close();
-                System.out.println("close[2]");
             }
 
+            System.out.println("call flush.get[1]");
+            topicWriter.flush().get();
+            System.out.println("call flush.get[2]");
+
+            System.out.println("call sync.get[1]");
+            Futures.allAsList(sync).get();
+            System.out.println("call sync.get[2]");
+
         } finally {
+            System.out.println("close[1]");
+            topicWriter.close();
+            System.out.println("close[2]");
         }
 
         // finish time
