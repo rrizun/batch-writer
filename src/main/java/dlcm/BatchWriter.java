@@ -271,9 +271,9 @@ public class BatchWriter {
                 JsonObject userRecord = new JsonObject();
                 String key = Hashing.sha256().hashLong(i % rate).toString();
 
-                byte[] bytes = new byte[new Random().nextInt(16)];
-                new SecureRandom().nextBytes(bytes);
-                key = BaseEncoding.base64().encode(bytes).toString();
+                // byte[] bytes = new byte[new Random().nextInt(16)];
+                // new SecureRandom().nextBytes(bytes);
+                // key = BaseEncoding.base64().encode(bytes).toString();
 
                 userRecord.addProperty("entityKey", key);
                 userRecord.addProperty("entityType", "/foo/bar/baz");
