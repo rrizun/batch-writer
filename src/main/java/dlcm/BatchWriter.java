@@ -4,10 +4,16 @@ import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.OutputStream;
 import java.io.OutputStreamWriter;
+import java.security.SecureRandom;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Random;
+import java.util.Set;
+import java.util.Map.Entry;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Executor;
@@ -57,20 +63,23 @@ public class BatchWriter {
 
     private ByteArrayOutputStream baos = new ByteArrayOutputStream();
     private JsonWriter jsonWriter = new JsonWriter(new OutputStreamWriter(baos));
-    private final AtomicReference<List<VoidFuture>> userRecordFutures = new AtomicReference<>(new ArrayList<>());
+    private final AtomicReference<Set<Long>> userRecordFutures = new AtomicReference<>(new HashSet<>());
+
+    private long nextFutureId;
+    private final Map<Long, VoidFuture> allFutures = new HashMap<>();
 
     // private static final int DEFAULT_MAX_CONNECTIONS = 50;
     // private static final int DEFAULT_MAX_CONNECTION_ACQUIRES = 10_000;
 
     private final NettyNioAsyncHttpClient.Builder httpClientBuilder = NettyNioAsyncHttpClient.builder()
     //
-    // .maxConcurrency(250)
+    .maxConcurrency(250)
     //
     ;
 
     private final SnsAsyncClient snsClient = SnsAsyncClient.builder()
             //
-            // .httpClientBuilder(httpClientBuilder)
+            .httpClientBuilder(httpClientBuilder)
             //
             .build();
 
@@ -119,6 +128,10 @@ public class BatchWriter {
                 {
                     jsonWriter.endArray();
                     sendBatchNow().addListener(() -> {
+                        // setVoid(); // set future result
+                    }, MoreExecutors.directExecutor());
+
+                    Futures.allAsList(allFutures.values()).addListener(()->{
                         setVoid(); // set future result
                     }, MoreExecutors.directExecutor());
                     jsonWriter.beginArray();
@@ -132,28 +145,30 @@ public class BatchWriter {
      */
     public ListenableFuture<Void> addToBatch(JsonElement jsonElement) throws Exception {
         synchronized (lock) {
-            return new VoidFuture(){
+            return new VoidFuture() {
                 {
                     // requestMeter.mark(1);
                     String jsonValue = jsonElement.toString();
-        
+
                     final int MAX_MSG_LEN = 256 * 1024; // sns/sqs 256KB
-    
+
                     // will this exceed the max msg len?
-                    // the -1 is for closing the json array with a ']'
-                    if (baos.size() + jsonValue.length() > MAX_MSG_LEN - 1) {
-    
+                    // the -2 is for ',' and  ']'
+                    if (baos.size() + jsonValue.length() > MAX_MSG_LEN - 2) {
+
                         // yes- publish now
                         jsonWriter.endArray();
                         sendBatchNow(); // does not block
                         jsonWriter.beginArray();
-    
+
                     }
-    
+
                     jsonWriter.jsonValue(jsonValue);
                     jsonWriter.flush();
-    
-                    userRecordFutures.get().add(this); // save future result
+
+                    long id = ++nextFutureId;
+                    userRecordFutures.get().add(id); // add to batch
+                    allFutures.put(id, this); // save this future result
                 }
             };
         }
@@ -161,10 +176,10 @@ public class BatchWriter {
 
     private ListenableFuture<Void> sendBatchNow() {
         trace("sendBatchNow", userRecordFutures.get().size());
-        
+
         // if (userRecordFutures.get().size()==0)
-        //     return Futures.immediateVoidFuture();
-        
+        // return Futures.immediateVoidFuture();
+
         return new AbstractFuture<Void>() {
             {
                 try {
@@ -196,13 +211,14 @@ public class BatchWriter {
                     trace(publishRequest.message().length());
 
                     // final int finalUserRecordBatchCount = userRecordBatchCount; // take snapshot
-                    final List<VoidFuture> copy = userRecordFutures.getAndSet(new ArrayList<>());
+                    final Set<Long> copy = userRecordFutures.getAndSet(new HashSet<>());
+                    // allFutures.putAll(copy);
 
                     ListenableFuture<PublishResponse> listenableFuture = lf(snsClient.publish(publishRequest));
-                    
+
                     requestMeter.mark(copy.size());
-                    stats();
-                    
+                    stats("[>>>request>>>]");
+
                     ++busy;
                     listenableFuture.addListener(() -> {
                         synchronized (lock) {
@@ -210,16 +226,19 @@ public class BatchWriter {
                                 PublishResponse publishResponse = listenableFuture.get();
                                 trace(publishResponse);
                                 successMeter.mark(copy.size());
-                                stats();
-                                for (VoidFuture future : copy)
-                                    future.setVoid();
+                                stats("[<<<success<<<]");
+                                for (Long futureId : copy) {
+                                    allFutures.remove(futureId).setVoid();
+                                }
                             } catch (Exception e) {
                                 log(e);
-                                e.printStackTrace();
+                                // e.printStackTrace();
+                                log("publishRequestMessageLength", publishRequest.message().length());
                                 failureMeter.mark(copy.size());
-                                stats();
-                                for (VoidFuture future : copy)
-                                    future.setException(e);
+                                stats("[<<<failure<<<]");
+                                for (Long futureId : copy) {
+                                    allFutures.remove(futureId).setException(e);
+                                }
                             } finally {
                                 --busy;
                                 lock.notifyAll(); // signal
@@ -231,7 +250,6 @@ public class BatchWriter {
                     // STEP 3 start new batch
                     baos.reset();
                     jsonWriter = new JsonWriter(new OutputStreamWriter(baos));
-                    // userRecordFutures.clear();
 
                 } catch (Exception e) {
                     setException(e); // set publishNow future exception
@@ -260,11 +278,16 @@ public class BatchWriter {
             System.out.println("rate:" + rate);
             final RateLimiter rateLimiter = RateLimiter.create(rate); // per second
 
-            List<ListenableFuture<Void>> sync = new CopyOnWriteArrayList<>();
+            // List<ListenableFuture<Void>> sync = new CopyOnWriteArrayList<>();
             long seconds = 25;
-            for (long i = 0; i < seconds * rate; ++i) {
+            for (long i = 1; i <= seconds * rate; ++i) {
                 JsonObject userRecord = new JsonObject();
                 String key = Hashing.sha256().hashLong(i % rate).toString();
+
+                byte[] bytes = new byte[new Random().nextInt(16)];
+                new SecureRandom().nextBytes(bytes);
+                key = BaseEncoding.base64().encode(bytes).toString();
+
                 userRecord.addProperty("entityKey", key);
                 userRecord.addProperty("entityType", "/foo/bar/baz");
                 userRecord.addProperty("version", System.currentTimeMillis());
@@ -276,20 +299,19 @@ public class BatchWriter {
                 rateLimiter.acquire();
 
                 // periodic checkpoint
-                if (i % (2*rate) == 0) {
-                    topicWriter.flush();
-                    Futures.allAsList(sync).get();
-                    sync.clear();
-                }
+                // if (i % (2*seconds) == 0)
+                // {
+                //     System.out.println("call flush.get[1]");
+                //     // topicWriter.flush();
+                //     System.out.println("call flush.get[2]");
+                //     // Futures.allAsList(sync).get();
+                //     // sync.clear();
+                // }
             }
 
-            System.out.println("call flush.get[1]");
-            topicWriter.flush().get();
-            System.out.println("call flush.get[2]");
-
-            System.out.println("call sync.get[1]");
-            Futures.allAsList(sync).get();
-            System.out.println("call sync.get[2]");
+            // System.out.println("call flush.get[1]");
+            // topicWriter.flush().get();
+            // System.out.println("call flush.get[2]");
 
         } finally {
             System.out.println("close[1]");
@@ -302,8 +324,8 @@ public class BatchWriter {
 
     }
 
-    private void stats() {
-        log("request", requestMeter, "success", successMeter, "failure", failureMeter);
+    private void stats(String s) {
+        log(s, "request", requestMeter, "success", successMeter, "failure", failureMeter);
     }
 
     private <T> ListenableFuture<T> lf(CompletableFuture<T> cf) {
