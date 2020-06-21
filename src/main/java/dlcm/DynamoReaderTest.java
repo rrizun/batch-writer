@@ -2,6 +2,7 @@ package dlcm;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicLong;
 
 import com.google.common.hash.Hashing;
 import com.google.common.util.concurrent.ListenableFuture;
@@ -24,26 +25,35 @@ public class DynamoReaderTest {
 
     final DynamoReader dynamoReader = new DynamoReader("DlcmStack-TableCD117FA1-10BX86V213J7Z");
     dynamoReader.start();
+
+    AtomicLong counter = new AtomicLong();
+
     try {
 
       // Map<String, AttributeValue> key = ImmutableMap.of("key",
       //     AttributeValue.builder().s("00e3d448ba79ee31b68784fd3890233ccf82c88e118984e7e129b921e87d7172").build());
       
+      final int seconds = 120;
       final RateLimiter rateLimiter = RateLimiter.create(5000);
-      for (int i = 0; i < 300*rateLimiter.getRate(); ++i) {
+      for (int i = 0; i < seconds*rateLimiter.getRate(); ++i) {
         rateLimiter.acquire();
-        Map<String, AttributeValue> key = createKey(i);
+
+        // if (i%rateLimiter.getRate()==0)
+        //   dynamoReader.flush();
+
+          Map<String, AttributeValue> key = createKey(i%Double.valueOf(rateLimiter.getRate()).intValue());
         ListenableFuture<Map<String, AttributeValue>> future = dynamoReader.getItem(key);
         future.addListener(()->{
           try {
             // System.out.println(future.get());
+            counter.incrementAndGet();
           } catch (Exception e) {
             e.printStackTrace();
           }
         }, MoreExecutors.directExecutor());
       }
 
-      dynamoReader.flush();
+      // dynamoReader.flush();
 
     } catch (Exception e) {
       e.printStackTrace();
@@ -53,6 +63,8 @@ public class DynamoReaderTest {
       System.out.println("close[2]");
 
       log(System.currentTimeMillis()-t0, "ms");
+
+      log("counter", counter);
 
     }
 
