@@ -20,6 +20,18 @@ dependencies {
 	implementation "software.amazon.awssdk:apache-client"
 	implementation "software.amazon.awssdk:netty-nio-client"
 
+	implementation "org.slf4j:slf4j-api:+"
+	// implementation "org.slf4j:slf4j-jcl:+"
+
+	implementation "ch.qos.logback:logback-core:+"
+	implementation "ch.qos.logback:logback-classic:+"
+
+						// implementation "org.codehaus.groovy:groovy:+"
+					// To fix it i added this dependency runtime 'org.codehaus.groovy:groovy:2.4.15' in build.gradle
+
+
+
+
 }
 
 run {
