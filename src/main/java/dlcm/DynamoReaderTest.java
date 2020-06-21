@@ -3,10 +3,10 @@ package dlcm;
 import java.util.HashMap;
 import java.util.Map;
 
-import com.google.common.collect.ImmutableMap;
 import com.google.common.hash.Hashing;
 import com.google.common.util.concurrent.ListenableFuture;
 import com.google.common.util.concurrent.MoreExecutors;
+import com.google.common.util.concurrent.RateLimiter;
 import com.google.gson.Gson;
 
 import helpers.LogHelper;
@@ -29,12 +29,14 @@ public class DynamoReaderTest {
       // Map<String, AttributeValue> key = ImmutableMap.of("key",
       //     AttributeValue.builder().s("00e3d448ba79ee31b68784fd3890233ccf82c88e118984e7e129b921e87d7172").build());
       
-      for (int i = 0; i < 1001; ++i) {
+      final RateLimiter rateLimiter = RateLimiter.create(5000);
+      for (int i = 0; i < 300*rateLimiter.getRate(); ++i) {
+        rateLimiter.acquire();
         Map<String, AttributeValue> key = createKey(i);
         ListenableFuture<Map<String, AttributeValue>> future = dynamoReader.getItem(key);
         future.addListener(()->{
           try {
-            System.out.println(future.get());
+            // System.out.println(future.get());
           } catch (Exception e) {
             e.printStackTrace();
           }

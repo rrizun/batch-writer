@@ -13,6 +13,38 @@ import helpers.LogHelper;
 import software.amazon.awssdk.services.dynamodb.*;
 import software.amazon.awssdk.services.dynamodb.model.*;
 
+
+
+
+
+// at java.lang.Thread.run(Thread.java:748)
+// Caused by: software.amazon.awssdk.core.exception.SdkClientException: Unable to execute HTTP request: Acquire operation took longer than the configured maximum time. This indicates that a request cannot get a connection from the pool within the specified maximum time. This can be due to high request rate.
+// Consider taking any of the following actions to mitigate the issue: increase max connections, increase acquire timeout, or slowing the request rate.
+// Increasing the max connections can increase client throughput (unless the network interface is already fully utilized), but can eventually start to hit operation system limitations on the number of file descriptors used by the process. If you already are fully utilizing your network interface or cannot further increase your connection count, increasing the acquire timeout gives extra time for requests to acquire a connection before timing out. If the connections doesn't free up, the subsequent requests will still timeout.
+// If the above mechanisms are not able to fix the issue, try smoothing out your requests so that large traffic bursts cannot overload the client, being more efficient with the number of times you need to call AWS, or by increasing the number of hosts sending requests.
+//         at software.amazon.awssdk.core.exception.SdkClientException$BuilderImpl.build(SdkClientException.java:98)
+//         at software.amazon.awssdk.core.exception.SdkClientException.create(SdkClientException.java:43)
+//         at software.amazon.awssdk.core.internal.http.pipeline.stages.utils.RetryableStageHelper.setLastException(RetryableStageHelper.java:199)
+//         at software.amazon.awssdk.core.internal.http.pipeline.stages.AsyncRetryableStage$RetryingExecutor.maybeRetryExecute(AsyncRetryableStage.java:143)
+//         ... 18 more
+// Caused by: java.lang.Throwable: Acquire operation took longer than the configured maximum time. This indicates that a request cannot get a connection from the pool within the specified maximum time. This can be due to high request rate.
+// Consider taking any of the following actions to mitigate the issue: increase max connections, increase acquire timeout, or slowing the request rate.
+// Increasing the max connections can increase client throughput (unless the network interface is already fully utilized), but can eventually start to hit operation system limitations on the number of file descriptors used by the process. If you already are fully utilizing your network interface or cannot further increase your connection count, increasing the acquire timeout gives extra time for requests to acquire a connection before timing out. If the connections doesn't free up, the subsequent requests will still timeout.
+// If the above mechanisms are not able to fix the issue, try smoothing out your requests so that large traffic bursts cannot overload the client, being more efficient with the number of times you need to call AWS, or by increasing the number of hosts sending requests.
+//         at software.amazon.awssdk.http.nio.netty.internal.NettyRequestExecutor.decorateException(NettyRequestExecutor.java:275)
+//         at software.amazon.awssdk.http.nio.netty.internal.NettyRequestExecutor.handleFailure(NettyRequestExecutor.java:268)
+//         ... 11 more
+// Caused by: java.util.concurrent.TimeoutException: Acquire operation took longer then configured maximum time
+//         at software.amazon.awssdk.http.nio.netty.internal.utils.BetterFixedChannelPool.<init>(...)(Unknown Source)
+// java.util.concurrent.ExecutionException: software.amazon.awssdk.core.exception.SdkClientException: Unable to execute HTTP request: Acquire operation took longer than the configured maximum time. This indicates that a request cannot get a connection from the pool within the specified maximum time. This can be due to high request rate.
+// Consider taking any of the following actions to mitigate the issue: increase max connections, increase acquire timeout, or slowing the request rate.
+// Increasing the max connections can increase client throughput (unless the network interface is already fully utilized), but can eventually start to hit operation system limitations on the number of file descriptors used by the process. If you already are fully utilizing your network interface or cannot further increase your connection count, increasing the acquire timeout gives extra time for requests to acquire a connection before timing out. If the connections doesn't free up, the subsequent requests will still timeout.
+// If the above mechanisms are not able to fix the issue, try smoothing out your requests so that large traffic bursts cannot overload the client, being more efficient with the number of times you need to call AWS, or by increasing the number of hosts sending requests.
+//         at com.google.common.util.concurrent.AbstractFuture.getDoneValue(AbstractFuture.java:564)
+
+
+
+
 class GetItemFuture extends AbstractFuture<Map<String, AttributeValue>> {
   public boolean set(Map<String, AttributeValue> value) {
     return super.set(value);
@@ -26,16 +58,16 @@ class GetItemFuture extends AbstractFuture<Map<String, AttributeValue>> {
 public class DynamoReader {
 
   private final String tableName;
-  private final DynamoDbAsyncClient dynamo = DynamoDbAsyncClient.builder()
-  //
-  //
-  .build();
+  private final DynamoDbAsyncClient dynamo = DynamoDbAsyncClient.create();
 
   private final Multimap<Map<String, AttributeValue>, GetItemFuture> allFutures = ArrayListMultimap.create();
   private final AtomicReference<Set<Map<String, AttributeValue>>> workingBatch = new AtomicReference<>(new HashSet<>());
 
   private int busy;
   private final Object lock = new Object();
+
+  private final MyMeter rcuMeter = new MyMeter();
+  private final MyMeter unprocessedKeyMeter = new MyMeter();
 
   /**
    * ctor
@@ -73,12 +105,12 @@ public class DynamoReader {
    * @return
    */
   public ListenableFuture<Void> flush() {
-    log("flush");
+    trace("flush");
     synchronized (lock) {
       return new AbstractFuture<Void>() {
         {
           sendBatchNow();
-          Futures.allAsList(allFutures.values()).addListener(()->{
+          Futures.successfulAsList(allFutures.values()).addListener(()->{
             set(Defaults.defaultValue(Void.class)); // set future result
           }, MoreExecutors.directExecutor());
         }
@@ -112,7 +144,7 @@ public class DynamoReader {
    */
   private void sendBatchNow() {
     if (!workingBatch.get().isEmpty()) {
-      log("sendBatchNow");
+      trace("sendBatchNow");
       final Set<Map<String, AttributeValue>> inFlight = workingBatch.getAndSet(new HashSet<>());
 
       // infer key schema
@@ -130,6 +162,8 @@ public class DynamoReader {
           //
           .requestItems(ImmutableMap.of(tableName, keysAndAttributes))
           //
+          .returnConsumedCapacity(ReturnConsumedCapacity.TOTAL)
+          //
           .build();
 
       ListenableFuture<BatchGetItemResponse> batchGetItemResponseFuture = lf(dynamo.batchGetItem(batchGetItemRequest));
@@ -140,12 +174,17 @@ public class DynamoReader {
             BatchGetItemResponse batchGetItemResponse = batchGetItemResponseFuture.get();
 
             trace(batchGetItemResponse);
+
+            for (ConsumedCapacity consumedCapacity : batchGetItemResponse.consumedCapacity())
+              rcuMeter.mark(consumedCapacity.capacityUnits().longValue());
+
             // successMeter.mark(sentBatch.size());
-            // stats("[<<<success<<<]");
+            stats("batchGetItemResponse");
 
             // failure 500
             if (batchGetItemResponse.hasUnprocessedKeys()) {
               for (KeysAndAttributes unprocessedKeys : batchGetItemResponse.unprocessedKeys().values()) {
+                unprocessedKeyMeter.mark(unprocessedKeys.keys().size());
                 for (Map<String, AttributeValue> key : unprocessedKeys.keys()) {
                   for (GetItemFuture future : allFutures.removeAll(key))
                     future.setException(new Exception("UnprocessedKey"));
@@ -171,7 +210,7 @@ public class DynamoReader {
             }
           } catch (Exception e) {
             log(e);
-            e.printStackTrace();
+            // e.printStackTrace();
             for (Map<String, AttributeValue> key : inFlight) {
               for (GetItemFuture future : allFutures.removeAll(key))
                 future.setException(e);
@@ -183,6 +222,10 @@ public class DynamoReader {
         }
       }, MoreExecutors.directExecutor());
     }
+  }
+
+  private void stats(String s) {
+    log(s, "rcu", rcuMeter, "unprocessedKey", unprocessedKeyMeter);
   }
 
   private <T> ListenableFuture<T> lf(CompletableFuture<T> cf) {
