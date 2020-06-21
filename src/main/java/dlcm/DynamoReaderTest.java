@@ -34,7 +34,7 @@ public class DynamoReaderTest {
       //     AttributeValue.builder().s("00e3d448ba79ee31b68784fd3890233ccf82c88e118984e7e129b921e87d7172").build());
       
       final int seconds = 120;
-      final RateLimiter rateLimiter = RateLimiter.create(5000);
+      final RateLimiter rateLimiter = RateLimiter.create(10000);
       for (int i = 0; i < seconds*rateLimiter.getRate(); ++i) {
         rateLimiter.acquire();
 

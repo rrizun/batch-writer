@@ -72,7 +72,7 @@ public class DynamoReader {
 
   private final NettyNioAsyncHttpClient.Builder httpClientBuilder = NettyNioAsyncHttpClient.builder()
   //
-  .maxConcurrency(50*Runtime.getRuntime().availableProcessors())
+  // .maxConcurrency(50*Runtime.getRuntime().availableProcessors())
   //
   // .maxPendingConnectionAcquires(10_000*Runtime.getRuntime().availableProcessors())
   ;
