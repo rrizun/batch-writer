@@ -2,11 +2,12 @@ package dlcm;
 
 import java.util.*;
 import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicLong;
 
 class MyMeter {
 
-  private long sum;
-  private final NavigableMap<Long, Long> values = new ConcurrentSkipListMap<>();
+  // private AtomicLong sum = new AtomicLong();
+  private final NavigableMap<Long, AtomicLong> values = new ConcurrentSkipListMap<>();
 
   private long now() {
     long now = System.currentTimeMillis();
@@ -17,12 +18,18 @@ class MyMeter {
 
   public void mark(long value) {
     long now = now();
-    sum += value;
-    values.put(now, values.getOrDefault(now, 0L) + value);
-    values.keySet().retainAll(values.tailMap(now - 900*1000).keySet());
+    // sum.addAndGet(value);
+
+    values.computeIfAbsent(now, k -> new AtomicLong()).addAndGet(value);
+
+    // values.keySet().retainAll(values.tailMap(now - 900*1000).keySet());
   }
 
   public long sum() {
+    // return sum.get();
+    long sum = 0;
+    for (AtomicLong value : values.values())
+      sum += value.get();
     return sum;
   }
 
@@ -31,8 +38,8 @@ class MyMeter {
     long fromKey = now - periodSeconds*1000;
     long toKey = now;
     long sum = 0;
-    for (long value : values.subMap(fromKey, true, toKey, false).values())
-      sum += value;
+    for (AtomicLong value : values.subMap(fromKey, true, toKey, false).values())
+      sum += value.get();
     return sum;
   }
 
