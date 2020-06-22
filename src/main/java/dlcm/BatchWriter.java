@@ -31,6 +31,8 @@ import com.spotify.futures.CompletableFuturesExtra;
 
 import helpers.LogHelper;
 import helpers.VoidFuture;
+import software.amazon.awssdk.core.client.config.ClientAsyncConfiguration;
+import software.amazon.awssdk.core.client.config.SdkAdvancedAsyncClientOption;
 import software.amazon.awssdk.http.nio.netty.NettyNioAsyncHttpClient;
 import software.amazon.awssdk.services.sns.SnsAsyncClient;
 import software.amazon.awssdk.services.sns.model.PublishRequest;
@@ -40,11 +42,9 @@ public class BatchWriter {
 
     // config
     private final boolean compress; // true to use gzip compression
-    private final long lingerMs;
-
-    private final Object lock = new Object();
 
     private int busy; // in-flight
+    private final Object lock = new Object();
 
     private ByteArrayOutputStream baos = new ByteArrayOutputStream();
     private JsonWriter jsonWriter = new JsonWriter(new OutputStreamWriter(baos));
@@ -62,9 +62,17 @@ public class BatchWriter {
     //
     ;
 
+    private final ClientAsyncConfiguration clientAsyncConfiguration = ClientAsyncConfiguration.builder()
+    //
+    .advancedOption(SdkAdvancedAsyncClientOption.FUTURE_COMPLETION_EXECUTOR, MoreExecutors.directExecutor())
+    //
+    .build();
+  
     private final SnsAsyncClient snsClient = SnsAsyncClient.builder()
             //
             // .httpClientBuilder(httpClientBuilder)
+            //
+            .asyncConfiguration(clientAsyncConfiguration)
             //
             .build();
 
@@ -79,13 +87,11 @@ public class BatchWriter {
      * ctor
      * 
      * @param compress
-     * @param lingerMs
      * @throws Exception
      */
-    public BatchWriter(boolean compress, long lingerMs) throws Exception {
+    public BatchWriter(boolean compress) throws Exception {
         log("ctor");
         this.compress = compress;
-        this.lingerMs = lingerMs;
     }
 
     public void start() throws Exception {
@@ -104,6 +110,7 @@ public class BatchWriter {
                 lock.wait();
         }
         snsClient.close();
+        stats("close");
     }
 
     public ListenableFuture<Void> flush() throws Exception {
@@ -195,7 +202,6 @@ public class BatchWriter {
             ListenableFuture<PublishResponse> listenableFuture = lf(snsClient.publish(publishRequest));
 
             requestMeter.mark(sentBatch.size());
-            stats("[>>>request>>>]");
 
             ++busy;
             listenableFuture.addListener(() -> {
@@ -204,22 +210,20 @@ public class BatchWriter {
                         PublishResponse publishResponse = listenableFuture.get();
                         trace(publishResponse);
                         successMeter.mark(sentBatch.size());
-                        stats("[<<<success<<<]");
                         for (Long futureId : sentBatch) {
                             allFutures.remove(futureId).setVoid();
                         }
                     } catch (Exception e) {
                         log(e);
                         // e.printStackTrace();
-                        log("publishRequestMessageLength", publishRequest.message().length());
                         failureMeter.mark(sentBatch.size());
-                        stats("[<<<failure<<<]");
                         for (Long futureId : sentBatch) {
                             allFutures.remove(futureId).setException(e);
                         }
                     } finally {
                         --busy;
                         lock.notifyAll(); // signal
+                        stats("publishResponse");
                     }
                 }
             }, MoreExecutors.directExecutor());
@@ -228,92 +232,54 @@ public class BatchWriter {
             baos.reset();
             jsonWriter = new JsonWriter(new OutputStreamWriter(baos));
 
+            stats("publishRequst");
     }
 
     public static void main(String... args) throws Exception {
-
-        // start time
         final long t0 = System.currentTimeMillis();
+        try {
+            final long rate = args.length > 0 ? Long.parseLong(args[0]) : 7500;
+            final ExecutorService executor = Executors.newCachedThreadPool();
+            try {
+                int coreCount = 2;
+                // int coreCount = Runtime.getRuntime().availableProcessors();
+                for (int core = 0; core < coreCount; ++core) {
+                    executor.execute(() -> {
+                        try {
+                            final BatchWriter topicWriter = new BatchWriter(false);
+                            topicWriter.start();
+                            try {
+                                final RateLimiter rateLimiter = RateLimiter.create(rate / coreCount); // per second
+                                for (long i = 1; i <= 25 * rateLimiter.getRate(); ++i) {
+                                    rateLimiter.acquire();
 
-        final long seconds = 25;
-        final long aggRate = args.length > 0 ? Long.parseLong(args[0]) : 7500;
+                                    JsonObject userRecord = new JsonObject();
+                                    String key = Hashing.sha256().hashLong(i % 1000000).toString();
 
-        int cores = Runtime.getRuntime().availableProcessors();
-        System.out.println("cores="+cores);
+                                    userRecord.addProperty("entityKey", key);
+                                    userRecord.addProperty("entityType", "/foo/bar/baz");
+                                    userRecord.addProperty("version", System.currentTimeMillis());
 
-        final ExecutorService executor = Executors.newCachedThreadPool();
-        for (int core = 0; core < cores; ++core) {
-            executor.execute(()->{
-
-                long rate = aggRate/cores;
-
-                try {
-        
-                    final BatchWriter topicWriter = new BatchWriter(false, 2000);
-                    System.out.println("start");
-                    topicWriter.start();
-            
-            
-                    System.out.println("rate:" + rate);
-                    final RateLimiter rateLimiter = RateLimiter.create(rate); // per second
-        
-                    // List<ListenableFuture<Void>> sync = new CopyOnWriteArrayList<>();
-                    for (long i = 1; i <= seconds * rate; ++i) {
-                        JsonObject userRecord = new JsonObject();
-                        String key = Hashing.sha256().hashLong(i % rate).toString();
-        
-                        // byte[] bytes = new byte[new Random().nextInt(16)];
-                        // new SecureRandom().nextBytes(bytes);
-                        // key = BaseEncoding.base64().encode(bytes).toString();
-        
-                        userRecord.addProperty("entityKey", key);
-                        userRecord.addProperty("entityType", "/foo/bar/baz");
-                        userRecord.addProperty("version", System.currentTimeMillis());
-                        
-                        ListenableFuture<Void> f = topicWriter.addToBatch(userRecord);
-                        // sync.add(f);
-        
-                        // rate limit
-                        rateLimiter.acquire();
-        
-                        // periodic checkpoint
-                        // if (i % (2*seconds) == 0)
-                        // {
-                        //     System.out.println("call flush.get[1]");
-                        //     // topicWriter.flush();
-                        //     System.out.println("call flush.get[2]");
-                        //     // Futures.allAsList(sync).get();
-                        //     // sync.clear();
-                        // }
-                    }
-        
-                    // System.out.println("call flush.get[1]");
-                    // topicWriter.flush().get();
-                    // System.out.println("call flush.get[2]");
-        
-                    System.out.println((System.currentTimeMillis() - t0) + "ms");
-
-                    System.out.println("close[1]");
-                    topicWriter.close();
-                    System.out.println("close[2]");
-        
-                } catch (Exception e) {
-                    e.printStackTrace();
-                } finally {
-        
-                    System.out.println((System.currentTimeMillis() - t0) + "ms");
+                                    topicWriter.addToBatch(userRecord)/* .addListener(...) */;
+                                }
+                            } finally {
+                                topicWriter.close();
+                            }
+                        } catch (Exception e) {
+                            throw new RuntimeException(e);
+                        }
+                    });
                 }
-        
-            });
+            } finally {
+                MoreExecutors.shutdownAndAwaitTermination(executor, Duration.ofMillis(Long.MAX_VALUE));
+            }
+        } finally {
+            System.out.println((System.currentTimeMillis() - t0) + "ms");
         }
-
-        MoreExecutors.shutdownAndAwaitTermination(executor, Duration.ofMillis(Long.MAX_VALUE));
-
-
     }
 
     private void stats(String s) {
-        log(s, "request", requestMeter, "success", successMeter, "failure", failureMeter);
+        log(s, String.format("[%s]", busy), "request", requestMeter, "success", successMeter, "failure", failureMeter);
     }
 
     private <T> ListenableFuture<T> lf(CompletableFuture<T> cf) {
