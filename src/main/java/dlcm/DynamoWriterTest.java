@@ -2,10 +2,12 @@ package dlcm;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicLong;
 
 import com.google.common.hash.Hashing;
 import com.google.common.util.concurrent.FutureCallback;
 import com.google.common.util.concurrent.Futures;
+import com.google.common.util.concurrent.MoreExecutors;
 import com.google.common.util.concurrent.RateLimiter;
 import com.google.gson.Gson;
 
@@ -14,27 +16,27 @@ import org.checkerframework.checker.nullness.qual.Nullable;
 import helpers.LogHelper;
 import software.amazon.awssdk.services.dynamodb.model.AttributeValue;
 
-class MetaData {
+class MyMeta {
   public String entityKey;
   public String entityType;
   public long version;
-  public MetaData(String entityKey, String entityType, long version) {
+  public MyMeta(String entityKey, String entityType, long version) {
     this.entityKey= entityKey;
     this.entityType = entityType;
     this.version = version;
   }
 }
 
-public class Main {
+public class DynamoWriterTest {
 
   public static void main(String... args) throws Exception {
-    new Main().run();
+    new DynamoWriterTest().run();
   }
 
   private final String tableName = "DlcmStack-TableCD117FA1-10BX86V213J7Z";
 
-  int successCount;
-  int failureCount;
+  AtomicLong successCount = new AtomicLong();
+  AtomicLong failureCount = new AtomicLong();
 
   public void run() throws Exception {
     log("run");
@@ -48,27 +50,26 @@ public class Main {
       dynamoWriter.start();
       log("started");
 
-      final int rate = 128; // per second
-      final int numSeconds = 3600;
-      final RateLimiter rateLimiter = RateLimiter.create(rate);
-      for (int i = 0; i < rate * numSeconds; ++i) {
-        Futures.addCallback(dynamoWriter.addWriteRequest(createItem(i % 10000)), new FutureCallback<Void>() {
-          @Override
-          public void onSuccess(@Nullable Void result) {
-            ++successCount;
-          }
-          @Override
-          public void onFailure(Throwable t) {
-            log(t);
-            ++failureCount;
-          }
-        }, dynamoWriter.executor());
+      final RateLimiter rateLimiter = RateLimiter.create(8192);
+      for (int i = 0; i < 300*rateLimiter.getRate(); ++i) {
 
         // rate limit
         rateLimiter.acquire();
+
+        Futures.addCallback(dynamoWriter.addPutItem(createItem(i % 10000)), new FutureCallback<Void>() {
+          @Override
+          public void onSuccess(@Nullable Void result) {
+            successCount.incrementAndGet();
+          }
+          @Override
+          public void onFailure(Throwable t) {
+            // log(t);
+            failureCount.incrementAndGet();
+          }
+        }, MoreExecutors.directExecutor());
+
       }
 
-      // squeeze out that last batch
       dynamoWriter.flush();
 
     } finally {
@@ -80,18 +81,14 @@ public class Main {
     // finish time
     log(System.currentTimeMillis() - t0, "ms");
 
-    log("writeRequestCount", dynamoWriter.writeRequestCount);
-    log("totalConsumedCapacity", dynamoWriter.total);
-
     log("successCount", successCount);
     log("failureCount", failureCount);
-
 
   }
 
   private Map<String, AttributeValue> createItem(int i) {
     String key = Hashing.sha256().hashInt(i).toString();
-    MetaData metaData = new MetaData(key, "/foo/bar/baz", System.currentTimeMillis());
+    MyMeta metaData = new MyMeta(key, "/foo/bar/baz", System.currentTimeMillis());
 
     Map<String, AttributeValue> item = new HashMap<>();
     item.put("key", s(key));
