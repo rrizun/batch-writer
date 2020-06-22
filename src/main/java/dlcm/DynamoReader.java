@@ -194,22 +194,10 @@ public class DynamoReader {
     return future;
   }
 
-  private Set<Map<String, AttributeValue>> addToBatch(Map<String, AttributeValue> key) {
-    synchronized (workingBatch) {
-      workingBatch.get().add(key);
-      if (workingBatch.get().size() == 100)
-        return workingBatch.getAndSet(new HashSet<>());
-    }
-    return ImmutableSet.of();
-  }
-
   /**
    * tryToBatch
    */
   private void tryToBatch(Set<Map<String, AttributeValue>> inFlight) {
-
-    
-
     if (!inFlight.isEmpty())
     {
       trace("sendBatchNow", inFlight.size());
@@ -255,7 +243,9 @@ public class DynamoReader {
                 for (KeysAndAttributes unprocessedKeys : batchGetItemResponse.unprocessedKeys().values()) {
                   unprocessedKeyMeter.mark(unprocessedKeys.keys().size());
                   for (Map<String, AttributeValue> key : unprocessedKeys.keys()) {
-                    for (GetItemFuture future : allFutures.removeAll(key))
+                    Collection<GetItemFuture> futures = allFutures.removeAll(key);
+                    failureMeter.mark(futures.size());
+                    for (GetItemFuture future : futures)
                       future.setException(new Exception("UnprocessedKey"));
                   }
                 }

@@ -78,7 +78,7 @@ public class DynamoReaderTest {
 
   private Map<String, AttributeValue> createItem(int i) {
     String key = Hashing.sha256().hashInt(i).toString();
-    MetaData metaData = new MetaData(key, "/foo/bar/baz", System.currentTimeMillis());
+    MyMeta metaData = new MyMeta(key, "/foo/bar/baz", System.currentTimeMillis());
 
     Map<String, AttributeValue> item = new HashMap<>();
     item.put("key", s(key));
