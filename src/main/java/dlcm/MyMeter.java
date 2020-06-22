@@ -6,7 +6,6 @@ import java.util.concurrent.atomic.AtomicLong;
 
 class MyMeter {
 
-  // private AtomicLong sum = new AtomicLong();
   private final NavigableMap<Long, AtomicLong> values = new ConcurrentSkipListMap<>();
 
   private long now() {
@@ -18,15 +17,12 @@ class MyMeter {
 
   public void mark(long value) {
     long now = now();
-    // sum.addAndGet(value);
-
     values.computeIfAbsent(now, k -> new AtomicLong()).addAndGet(value);
-
-    // values.keySet().retainAll(values.tailMap(now - 900*1000).keySet());
+    // keep 15min worth
+    values.keySet().retainAll(values.tailMap(now - 900*1000).keySet());
   }
 
   public long sum() {
-    // return sum.get();
     long sum = 0;
     for (AtomicLong value : values.values())
       sum += value.get();
