@@ -30,7 +30,8 @@ class MyMeta {
 public class DynamoWriterTest {
 
   public static void main(String... args) throws Exception {
-    new DynamoWriterTest().run();
+    long rate = args.length > 0 ? Long.parseLong(args[0]) : 128;
+    new DynamoWriterTest().run(rate);
   }
 
   private final String tableName = "DlcmStack-TableCD117FA1-10BX86V213J7Z";
@@ -38,7 +39,7 @@ public class DynamoWriterTest {
   AtomicLong successCount = new AtomicLong();
   AtomicLong failureCount = new AtomicLong();
 
-  public void run() throws Exception {
+  public void run(long rate) throws Exception {
     log("run");
 
     // start time
@@ -50,7 +51,7 @@ public class DynamoWriterTest {
       dynamoWriter.start();
       log("started");
 
-      final RateLimiter rateLimiter = RateLimiter.create(8192);
+      final RateLimiter rateLimiter = RateLimiter.create(rate);
       for (int i = 0; i < 300*rateLimiter.getRate(); ++i) {
 
         // rate limit
