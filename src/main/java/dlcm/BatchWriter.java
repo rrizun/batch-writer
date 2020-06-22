@@ -12,6 +12,7 @@ import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.zip.GZIPOutputStream;
 
@@ -236,6 +237,8 @@ public class BatchWriter {
     }
 
     public static void main(String... args) throws Exception {
+        AtomicLong requests = new AtomicLong();
+        AtomicLong responses = new AtomicLong();
         final long t0 = System.currentTimeMillis();
         try {
             final long rate = args.length > 0 ? Long.parseLong(args[0]) : 7500;
@@ -250,7 +253,7 @@ public class BatchWriter {
                             topicWriter.start();
                             try {
                                 final RateLimiter rateLimiter = RateLimiter.create(rate / coreCount); // per second
-                                for (long i = 1; i <= 25 * rateLimiter.getRate(); ++i) {
+                                for (long i = 0; i < 25 * rateLimiter.getRate(); ++i) {
                                     rateLimiter.acquire();
 
                                     JsonObject userRecord = new JsonObject();
@@ -260,7 +263,10 @@ public class BatchWriter {
                                     userRecord.addProperty("entityType", "/foo/bar/baz");
                                     userRecord.addProperty("version", System.currentTimeMillis());
 
-                                    topicWriter.addToBatch(userRecord)/* .addListener(...) */;
+                                    requests.incrementAndGet();
+                                    topicWriter.addToBatch(userRecord).addListener(()->{
+                                        responses.incrementAndGet();
+                                    }, MoreExecutors.directExecutor());
                                 }
                             } finally {
                                 topicWriter.close();
@@ -274,6 +280,7 @@ public class BatchWriter {
                 MoreExecutors.shutdownAndAwaitTermination(executor, Duration.ofMillis(Long.MAX_VALUE));
             }
         } finally {
+            System.out.println(requests + " / " + responses);
             System.out.println((System.currentTimeMillis() - t0) + "ms");
         }
     }
