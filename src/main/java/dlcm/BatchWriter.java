@@ -30,19 +30,11 @@ import com.google.gson.stream.JsonWriter;
 import com.spotify.futures.CompletableFuturesExtra;
 
 import helpers.LogHelper;
+import helpers.VoidFuture;
 import software.amazon.awssdk.http.nio.netty.NettyNioAsyncHttpClient;
 import software.amazon.awssdk.services.sns.SnsAsyncClient;
 import software.amazon.awssdk.services.sns.model.PublishRequest;
 import software.amazon.awssdk.services.sns.model.PublishResponse;
-
-class VoidFuture extends AbstractFuture<Void> {
-    public boolean setVoid() {
-        return super.set(Defaults.defaultValue(Void.class));
-    }
-    public boolean setException(Throwable throwable) {
-        return super.setException(throwable);
-    }
-}
 
 public class BatchWriter {
 
