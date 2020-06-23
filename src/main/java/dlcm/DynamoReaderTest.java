@@ -59,7 +59,7 @@ public class DynamoReaderTest {
       e.printStackTrace();
     } finally {
       System.out.println("close[1]");
-      dynamoReader.close();
+      dynamoReader.close().get();
       System.out.println("close[2]");
 
       log(System.currentTimeMillis()-t0, "ms");

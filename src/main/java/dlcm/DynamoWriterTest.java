@@ -52,7 +52,7 @@ public class DynamoWriterTest {
       log("started");
 
       final RateLimiter rateLimiter = RateLimiter.create(rate);
-      for (int i = 0; i < 300*rateLimiter.getRate(); ++i) {
+      for (int i = 0; i < 25*rateLimiter.getRate(); ++i) {
 
         // rate limit
         rateLimiter.acquire();
@@ -71,11 +71,11 @@ public class DynamoWriterTest {
 
       }
 
-      dynamoWriter.flush();
+      // dynamoWriter.flush();
 
     } finally {
       log("close");
-      dynamoWriter.close();
+      dynamoWriter.close().get();
       log("closed");
     }
 

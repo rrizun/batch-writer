@@ -10,11 +10,24 @@ import com.google.common.util.concurrent.*;
 import com.spotify.futures.*;
 
 import helpers.LogHelper;
+import helpers.VoidFuture;
 import software.amazon.awssdk.core.client.config.ClientAsyncConfiguration;
 import software.amazon.awssdk.core.client.config.SdkAdvancedAsyncClientOption;
 import software.amazon.awssdk.http.nio.netty.NettyNioAsyncHttpClient;
 import software.amazon.awssdk.services.dynamodb.*;
 import software.amazon.awssdk.services.dynamodb.model.*;
+
+class Holder<T> {
+  public T value;
+  public Holder(T value) {
+    reset(value);
+  }
+  public T reset(T value) {
+    T tmp = this.value;
+    this.value = value;
+    return tmp;
+  }
+}
 
 // at java.lang.Thread.run(Thread.java:748)
 // Caused by: software.amazon.awssdk.core.exception.SdkClientException: Unable to execute HTTP request: Acquire operation took longer than the configured maximum time. This indicates that a request cannot get a connection from the pool within the specified maximum time. This can be due to high request rate.
@@ -91,7 +104,8 @@ public class DynamoReader {
   //
   .build();
 
-  private final AtomicReference<Set<Map<String, AttributeValue>>/* key */> workingBatch = new AtomicReference<>(new HashSet<>());
+  private final Object lock = new Object();
+  private final Holder<Set<Map<String, AttributeValue>>> setHolder = new Holder<>(new HashSet<>());
   private final Multimap<Map<String, AttributeValue>/* key */, GetItemFuture> allFutures = Multimaps.synchronizedListMultimap(ArrayListMultimap.create());
 
   // private int busy;
@@ -117,26 +131,33 @@ public class DynamoReader {
   /**
    * start
    */
-  public void start() throws Exception {
+  public ListenableFuture<Void> start() {
     log("start");
+    return Futures.immediateVoidFuture();
   }
 
   /**
    * close
    */
-  public void close() throws Exception {
-    log("close");
+  public ListenableFuture<Void> close() {
     stats("close");
-
-    // flush();
-    tryToBatch(workingBatch.get());
-
-    synchronized (allFutures) {
-      while (allFutures.size() > 0)
-        allFutures.wait();
-    }
-    dynamo.close();
-    stats("close");
+    return new VoidFuture() {
+      {
+        synchronized (lock) {
+          tryToBatch(setHolder.reset(new HashSet<>()));
+          Futures.allAsList(allFutures.values()).addListener(() -> {
+            try {
+              dynamo.close();
+              set(Defaults.defaultValue(Void.class));
+            } catch (Exception e) {
+              setException(e);
+            } finally {
+              stats("close");
+            }
+          }, MoreExecutors.directExecutor());
+        }
+      }
+    };
   }
 
   // /**
@@ -170,28 +191,32 @@ public class DynamoReader {
   // }
 
   /**
-   * addGetItemToBatch
+   * getItem
    * 
    * @param key
    * @return
    */
   public ListenableFuture<Map<String, AttributeValue>> getItem(Map<String, AttributeValue> key) {
     trace("getItem", key);
-    // synchronized (lock)
-
-    GetItemFuture future = new GetItemFuture();
-    allFutures.put(key, future);
-
-    Set<Map<String, AttributeValue>> tmp = ImmutableSet.of();
-    synchronized (workingBatch) {
-      workingBatch.get().add(key);
-      if (workingBatch.get().size() == 100)
-        tmp = workingBatch.getAndSet(new HashSet<>());
-    }
-    if (!tmp.isEmpty())
-      tryToBatch(tmp);
-    
-    return future;
+    return new GetItemFuture(){
+      {
+        // STEP 1 save future
+        allFutures.put(key, this);
+        // STEP 2 try to batch
+        Set<Map<String, AttributeValue>> tmp = ImmutableSet.of();
+        synchronized (lock) {
+          if (setHolder.value.add(key)) {
+            if (setHolder.value.size() == 100) {
+              // tmp = ImmutableSet.copyOf(workingSet);
+              // workingSet.clear();
+              tmp = setHolder.reset(new HashSet<>());
+            }
+          }
+        }
+        if (!tmp.isEmpty())
+          tryToBatch(tmp);
+      }
+    };
   }
 
   /**
@@ -281,10 +306,6 @@ public class DynamoReader {
                 }
               }
             } finally {
-              synchronized(allFutures) {
-                // --busy;
-                allFutures.notifyAll();
-              }
               stats("batchGetItemResponse");
             }
           } // synchronized

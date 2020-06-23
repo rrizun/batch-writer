@@ -1,23 +1,17 @@
 package dlcm;
 
-import java.time.Duration;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.Map.Entry;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicLong;
 
-import com.codahale.metrics.Meter;
-import com.codahale.metrics.MetricRegistry;
 import com.google.common.base.Defaults;
 import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.ImmutableSet;
 import com.google.common.util.concurrent.AbstractFuture;
+import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
 import com.google.common.util.concurrent.MoreExecutors;
 import com.spotify.futures.CompletableFuturesExtra;
@@ -52,7 +46,7 @@ public class DynamoWriter {
 
     private final NettyNioAsyncHttpClient.Builder httpClientBuilder = NettyNioAsyncHttpClient.builder()
             //
-            .maxConcurrency(50*Runtime.getRuntime().availableProcessors())
+            // .maxConcurrency(50*Runtime.getRuntime().availableProcessors())
     // //
     // .maxPendingConnectionAcquires(10_000)
     //
@@ -60,7 +54,7 @@ public class DynamoWriter {
 
     private final ClientAsyncConfiguration clientAsyncConfiguration = ClientAsyncConfiguration.builder()
     //
-    .advancedOption(SdkAdvancedAsyncClientOption.FUTURE_COMPLETION_EXECUTOR, MoreExecutors.directExecutor())
+    // .advancedOption(SdkAdvancedAsyncClientOption.FUTURE_COMPLETION_EXECUTOR, MoreExecutors.directExecutor())
     //
     .build();
   
@@ -75,10 +69,8 @@ public class DynamoWriter {
     private int busy;
     private final Object lock = new Object();
 
-    private final Map<WriteRequest, WriteRequestFuture> workingBatch = new HashMap<>();
-    // private final Map<Map<String, AttributeValue>/*keyOrItem*/, WriteRequestFuture> workingBatch = new HashMap<>();
-
-    // private final Map<WriteRequest, WriteRequestFuture> allFutures = new HashMap<>();
+    private final Set<WriteRequest> workingSet = new HashSet<>();
+    private final Map<WriteRequest, WriteRequestFuture> allFutures = new HashMap<>();
 
     private final MyMeter requestMeter = new MyMeter();
     private final MyMeter successMeter = new MyMeter();
@@ -97,27 +89,57 @@ public class DynamoWriter {
         this.tableName = tableName;
     }
 
-    public void start() throws Exception {
+    public ListenableFuture<Void> start() throws Exception {
         log("start");
+        return Futures.immediateVoidFuture();
     }
 
-    public void close() throws Exception {
-        log("close");
-        flush();
-        synchronized (lock) {
-            while (busy > 0) {
-                lock.wait();
+    public ListenableFuture<Void> close() throws Exception {
+        stats("close");
+        return new AbstractFuture<Void>() {
+          {
+            synchronized (lock) {
+              flush().addListener(()->{
+                synchronized (lock) {
+                    Futures.allAsList(allFutures.values()).addListener(() -> {
+                        synchronized (lock) {
+                          try {
+                              dynamo.close();
+                              stats("close");
+                              set(Defaults.defaultValue(Void.class));
+                            } catch (Exception e) {
+                                log(e);
+                                  setException(e);
+                            }
+                      }
+                    }, MoreExecutors.directExecutor());
+                }
+              }, MoreExecutors.directExecutor());
             }
-        }
-        dynamo.close();
+          }
+        };
+
+        // sendBatchNow();
+        // Futures.allAsList(allFutures.values()).addListener(()->{
+        //     setVoid(); // set future result
+        // }, MoreExecutors.directExecutor());
+
     }
 
-    public void flush() throws Exception {
+    public ListenableFuture<Void> flush() throws Exception {
         log("flush");
-        synchronized (lock) {
-            doBatchWriteItem(ImmutableMap.copyOf(workingBatch));
-            workingBatch.clear();
-        }
+        return new AbstractFuture<Void>(){
+            {
+                synchronized (lock) {
+                    doBatchWriteItem(copyAndClear(workingSet));
+                    Futures.allAsList(allFutures.values()).addListener(()->{
+                        synchronized (lock) {
+                            set(Defaults.defaultValue(Void.class));
+                        }
+                    }, MoreExecutors.directExecutor());
+                }
+            }
+        };
     }
 
     /**
@@ -129,20 +151,24 @@ public class DynamoWriter {
     public ListenableFuture<Void> addPutItem(Map<String, AttributeValue> item) {
         return new WriteRequestFuture() {
             {
-                ImmutableMap<WriteRequest, WriteRequestFuture> tmp = ImmutableMap.of();
                 synchronized (lock) {
-                    workingBatch.put(WriteRequest.builder().putRequest(PutRequest.builder().item(item).build()).build(), this);
+                    WriteRequest writeRequest = WriteRequest.builder().putRequest(PutRequest.builder().item(item).build()).build();
+                    
+                    if (allFutures.containsKey(writeRequest))
+                        log("HOLY CRAP", writeRequest);
+                    
+                    allFutures.put(writeRequest, this);
+                    
+                    if (workingSet.contains(writeRequest))
+                        log("HOLY CRAP", writeRequest);
+                    
+                    workingSet.add(writeRequest);
                     //###TODO also commit batch if duplicate keys
                     //###TODO also commit batch if duplicate keys
                     //###TODO also commit batch if duplicate keys
-                    if (workingBatch.size() == 25) {
-                        tmp = ImmutableMap.copyOf(workingBatch);
-                        workingBatch.clear();
-                    }
+                    if (workingSet.size() == 25)
+                        doBatchWriteItem(copyAndClear(workingSet));
                 }
-                if (!tmp.isEmpty())
-                    doBatchWriteItem(tmp);
-
             }
         };
     }
@@ -156,21 +182,35 @@ public class DynamoWriter {
     public ListenableFuture<Void> addDeleteItem(Map<String, AttributeValue> key) {
         return new WriteRequestFuture() {
             {
+                //###TODO THIS LOCK IS TOO COARSE GRAINED
+                //###TODO THIS LOCK IS TOO COARSE GRAINED
+                //###TODO THIS LOCK IS TOO COARSE GRAINED
                 synchronized (lock) {
+
+                    WriteRequest writeRequest = WriteRequest.builder().deleteRequest(DeleteRequest.builder().key(key).build()).build();
+
+                    allFutures.put(writeRequest, this);
+                //###TODO THIS LOCK IS TOO COARSE GRAINED
+                //###TODO THIS LOCK IS TOO COARSE GRAINED
+                //###TODO THIS LOCK IS TOO COARSE GRAINED
                     //###TODO also commit batch if duplicate keys
                     //###TODO also commit batch if duplicate keys
                     //###TODO also commit batch if duplicate keys
-                    workingBatch.put(WriteRequest.builder().deleteRequest(DeleteRequest.builder().key(key).build()).build(), this);
-                    if (workingBatch.size() == 25) {
-                        doBatchWriteItem(ImmutableMap.copyOf(workingBatch));
-                        workingBatch.clear();
-                    }
+                    workingSet.add(writeRequest);
+                    if (workingSet.size() == 25)
+                        doBatchWriteItem(copyAndClear(workingSet));
                 }
             }
         };
     }
 
-    private void doBatchWriteItem(ImmutableMap<WriteRequest, WriteRequestFuture> requestItems) {
+    private ImmutableSet<WriteRequest> copyAndClear(Set<WriteRequest> in) {
+        ImmutableSet<WriteRequest> result = ImmutableSet.copyOf(in);
+        in.clear();
+        return result;
+    }
+
+    private void doBatchWriteItem(final ImmutableSet<WriteRequest> requestItems) {
 
         if (requestItems.size()==0)
             return;
@@ -181,7 +221,7 @@ public class DynamoWriter {
 
             BatchWriteItemRequest batchWriteItemRequest = BatchWriteItemRequest.builder()
                     //
-                    .requestItems(ImmutableMap.of(tableName, requestItems.keySet()))
+                    .requestItems(ImmutableMap.of(tableName, requestItems))
                     //
                     .returnConsumedCapacity(ReturnConsumedCapacity.TOTAL)
                     //
@@ -202,10 +242,10 @@ public class DynamoWriter {
 
             requestMeter.mark(requestItems.size());
 
+            ++busy;
             responseFuture.addListener(() -> {
-                // synchronized (lock)
-                {
-                    
+                synchronized (lock) {
+                    --busy;
                     try {
                         BatchWriteItemResponse batchWriteItemResponse = responseFuture.get();
     
@@ -213,50 +253,72 @@ public class DynamoWriter {
     
                         for (ConsumedCapacity consumedCapacity : batchWriteItemResponse.consumedCapacity())
                             wcuMeter.mark(consumedCapacity.capacityUnits().longValue());
-    
+
                         // failure 500
                         if (batchWriteItemResponse.hasUnprocessedItems()) {
                             for (List<WriteRequest> unprocessedItems : batchWriteItemResponse.unprocessedItems().values()) {
-                                for (WriteRequest writeRequest : unprocessedItems) {
-                                    if (requestItems.get(writeRequest).setException(new Exception("UnprocessedItem")))
-                                        failureMeter.mark(1);
-                                }
+                                for (WriteRequest writeRequest : unprocessedItems)
+                                    failureMeter.mark(1);
                             }
                         }
     
                         // success 200
-                        for (WriteRequestFuture future : requestItems.values()) {
-                            if (future.set(Defaults.defaultValue(Void.class)))
+                        for (WriteRequest writeRequest : requestItems) {
+                            if (allFutures.containsKey(writeRequest))
                                 successMeter.mark(1);
+                        }
+
+                        stats("batchWriteItemResponse");
+
+                        // notify listeners
+                        if (batchWriteItemResponse.hasUnprocessedItems()) {
+                            for (List<WriteRequest> unprocessedItems : batchWriteItemResponse.unprocessedItems().values()) {
+                                for (WriteRequest writeRequest : unprocessedItems)
+                                    allFutures.remove(writeRequest).setException(new Exception("UnprocessedItem"));
+                            }
+                        }
+                        for (WriteRequest writeRequest : requestItems) {
+                            if (allFutures.containsKey(writeRequest))
+                                allFutures.remove(writeRequest).set(Defaults.defaultValue(Void.class));
                         }
     
                     } catch (Exception e) {
                         log(e);
-                        failureMeter.mark(requestItems.size());
-                        for (WriteRequestFuture future : requestItems.values())
-                            future.setException(e);
-                    } finally {
-                        synchronized (lock) {
-                            --busy;
-                            lock.notifyAll();
+                        for (WriteRequest writeRequest : requestItems) {
+                            if (allFutures.containsKey(writeRequest))
+                                failureMeter.mark(1);
                         }
-                        stats("batchWriteItemResponse");
+                        for (WriteRequest writeRequest : requestItems) {
+                            if (allFutures.containsKey(writeRequest))
+                                allFutures.remove(writeRequest).setException(e);
+                        }
+                    } finally {
+                        // for (WriteRequestFuture future : success) {
+                        //     future.set(Defaults.defaultValue(Void.class));
+                        // }
+                        // for (WriteRequestFuture future : failure) {
+                        //     future.setException(e);
+                            
+                        // }
+                        // synchronized (lock) {
+                        //     --busy;
+                        //     lock.notifyAll();
+                        // }
                     }
                 }
             }, MoreExecutors.directExecutor());
 
         } finally {
-            synchronized (lock) {
-                ++busy;
-            }
-            stats("batchWriteItemRequest");
+            // synchronized (lock) {
+            //     ++busy;
+            // }
+            // stats("batchWriteItemRequest");
         }
 
     }
 
     private void stats(String s) {
-        String zzz = String.format("[%s]", busy);
-        log(s, zzz, "request", requestMeter, "success", successMeter, "failure", failureMeter, "wcu", wcuMeter);
+        log(s, String.format("[%s]", busy), "request", requestMeter, "success", successMeter, "failure", failureMeter, "wcu", wcuMeter);
         // log(s, "request", requestMeter, "success", successMeter, "failure", failureMeter, "inFlight", allFutures.size(), "rcu", rcuMeter, "unprocessedKey", unprocessedKeyMeter);
       }
 
