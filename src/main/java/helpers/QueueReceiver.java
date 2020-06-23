@@ -1,28 +1,13 @@
-package dlcm;
+package helpers;
 
-import java.time.Duration;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Timer;
-import java.util.TimerTask;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.Executor;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.concurrent.*;
 
-import com.google.common.util.concurrent.ListenableFuture;
-import com.google.common.util.concurrent.MoreExecutors;
-import com.google.gson.Gson;
-import com.google.gson.JsonArray;
-import com.spotify.futures.CompletableFuturesExtra;
+import com.google.common.util.concurrent.*;
+import com.google.gson.*;
+import com.spotify.futures.*;
 
-import helpers.LogHelper;
-import software.amazon.awssdk.services.sqs.SqsAsyncClient;
-import software.amazon.awssdk.services.sqs.model.DeleteMessageRequest;
-import software.amazon.awssdk.services.sqs.model.DeleteMessageResponse;
-import software.amazon.awssdk.services.sqs.model.Message;
-import software.amazon.awssdk.services.sqs.model.ReceiveMessageRequest;
-import software.amazon.awssdk.services.sqs.model.ReceiveMessageResponse;
+import software.amazon.awssdk.services.sqs.*;
+import software.amazon.awssdk.services.sqs.model.*;
 
 class AwsNotification {
 	public String Type;
@@ -95,15 +80,10 @@ public class QueueReceiver {
   }
 
   public void start() {
-    int cores = Runtime.getRuntime().availableProcessors();
-
-    cores = 1;
-
-    log("start", cores);
+    log("start");
     synchronized(lock) {
       running = true;
-      for (int i = 0; i < cores; ++i)
-        doReceiveMessage(i);
+      doReceiveMessage(0);
     }
   }
 

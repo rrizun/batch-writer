@@ -1,7 +1,7 @@
 package helpers;
 
-import com.google.common.base.Defaults;
-import com.google.common.util.concurrent.AbstractFuture;
+import com.google.common.base.*;
+import com.google.common.util.concurrent.*;
 
 public class VoidFuture extends AbstractFuture<Void> {
   public boolean setVoid() {

@@ -1,43 +1,23 @@
-package dlcm;
+package helpers;
 
-import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
-import java.io.OutputStream;
-import java.io.OutputStreamWriter;
-import java.time.Duration;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.Map;
-import java.util.Set;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.atomic.AtomicLong;
-import java.util.concurrent.atomic.AtomicReference;
-import java.util.zip.GZIPOutputStream;
+import java.io.*;
+import java.time.*;
+import java.util.*;
+import java.util.concurrent.*;
+import java.util.concurrent.atomic.*;
+import java.util.zip.*;
 
-import com.google.common.base.Defaults;
-import com.google.common.hash.Hashing;
-import com.google.common.io.BaseEncoding;
-import com.google.common.io.ByteStreams;
-import com.google.common.util.concurrent.AbstractFuture;
-import com.google.common.util.concurrent.Futures;
-import com.google.common.util.concurrent.ListenableFuture;
-import com.google.common.util.concurrent.MoreExecutors;
-import com.google.common.util.concurrent.RateLimiter;
-import com.google.gson.JsonElement;
-import com.google.gson.JsonObject;
-import com.google.gson.stream.JsonWriter;
-import com.spotify.futures.CompletableFuturesExtra;
+import com.google.common.hash.*;
+import com.google.common.io.*;
+import com.google.common.util.concurrent.*;
+import com.google.gson.*;
+import com.google.gson.stream.*;
+import com.spotify.futures.*;
 
-import helpers.LogHelper;
-import helpers.VoidFuture;
-import software.amazon.awssdk.core.client.config.ClientAsyncConfiguration;
-import software.amazon.awssdk.core.client.config.SdkAdvancedAsyncClientOption;
-import software.amazon.awssdk.http.nio.netty.NettyNioAsyncHttpClient;
-import software.amazon.awssdk.services.sns.SnsAsyncClient;
-import software.amazon.awssdk.services.sns.model.PublishRequest;
-import software.amazon.awssdk.services.sns.model.PublishResponse;
+import software.amazon.awssdk.core.client.config.*;
+import software.amazon.awssdk.http.nio.netty.*;
+import software.amazon.awssdk.services.sns.*;
+import software.amazon.awssdk.services.sns.model.*;
 
 public class BatchWriter {
 
