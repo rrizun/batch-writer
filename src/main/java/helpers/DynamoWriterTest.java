@@ -35,7 +35,7 @@ public class DynamoWriterTest {
   AtomicLong failureCount = new AtomicLong();
 
   public void run(long rate) throws Exception {
-    log("run");
+    log("run", rate);
 
     // start time
     final long t0 = System.currentTimeMillis();
@@ -47,7 +47,7 @@ public class DynamoWriterTest {
       log("started");
 
       final RateLimiter rateLimiter = RateLimiter.create(rate);
-      for (int i = 0; i < 120*rateLimiter.getRate(); ++i) {
+      for (int i = 0; i < 25*rateLimiter.getRate(); ++i) {
 
         // rate limit
         rateLimiter.acquire();
