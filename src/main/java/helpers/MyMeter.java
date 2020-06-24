@@ -4,7 +4,7 @@ import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.*;
 
-class MyMeter {
+public class MyMeter {
 
   private final NavigableMap<Long, AtomicLong> values = new ConcurrentSkipListMap<>();
 
