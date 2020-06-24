@@ -40,14 +40,14 @@ public class DynamoWriterTest {
     // start time
     final long t0 = System.currentTimeMillis();
 
-    final DynamoWriter dynamoWriter = new DynamoWriter(tableName);
+    final DynamoWriter dynamoWriter = new DynamoWriter(tableName, AwsSdkTwo.dynamo);
     try {
       log("start");
       dynamoWriter.start();
       log("started");
 
       final RateLimiter rateLimiter = RateLimiter.create(rate);
-      for (int i = 0; i < 25*rateLimiter.getRate(); ++i) {
+      for (int i = 0; i < 120*rateLimiter.getRate(); ++i) {
 
         // rate limit
         rateLimiter.acquire();
@@ -66,12 +66,16 @@ public class DynamoWriterTest {
 
       }
 
-      // dynamoWriter.flush();
+      // dynamoWriter.flush().get();
+      log("flush[1]");
+      dynamoWriter.flush().get();
+      log("flush[2]");
 
     } finally {
-      log("close");
-      dynamoWriter.close().get();
-      log("closed");
+      log("close[1]");
+      AwsSdkTwo.dynamo.close();
+      log("close[2]");
+
     }
 
     // finish time
