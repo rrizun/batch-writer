@@ -19,7 +19,7 @@ class MyMeter {
     long now = now();
     values.computeIfAbsent(now, k -> new AtomicLong()).addAndGet(value);
     // keep 15min worth
-    values.keySet().retainAll(values.tailMap(now - 900*1000).keySet());
+    // values.keySet().retainAll(values.tailMap(now - 900*1000).keySet());
   }
 
   public long sum() {
