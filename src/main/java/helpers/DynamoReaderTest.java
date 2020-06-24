@@ -19,30 +19,28 @@ public class DynamoReaderTest {
 
     final long t0 = System.currentTimeMillis();
 
-    final DynamoReader dynamoReader = new DynamoReader("DlcmStack-TableCD117FA1-10BX86V213J7Z");
-    dynamoReader.start();
-
-    AtomicLong counter = new AtomicLong();
+    AtomicLong requests = new AtomicLong();
+    final DynamoReader dynamoReader = new DynamoReader("DlcmStack-TableCD117FA1-10BX86V213J7Z", AwsSdkTwo.dynamo);
 
     try {
 
       // Map<String, AttributeValue> key = ImmutableMap.of("key",
       //     AttributeValue.builder().s("00e3d448ba79ee31b68784fd3890233ccf82c88e118984e7e129b921e87d7172").build());
       
-      final int seconds = 120;
-      final RateLimiter rateLimiter = RateLimiter.create(10000);
-      for (int i = 0; i < seconds*rateLimiter.getRate(); ++i) {
+      // final int seconds = 120;
+      final RateLimiter rateLimiter = RateLimiter.create(2000);
+      for (int i = 0; i < 5*rateLimiter.getRate(); ++i) {
         rateLimiter.acquire();
 
         // if (i%rateLimiter.getRate()==0)
         //   dynamoReader.flush();
 
-          Map<String, AttributeValue> key = createKey(i%Double.valueOf(rateLimiter.getRate()).intValue());
+          Map<String, AttributeValue> key = createKey(i);
         ListenableFuture<Map<String, AttributeValue>> future = dynamoReader.getItem(key);
         future.addListener(()->{
           try {
             // System.out.println(future.get());
-            counter.incrementAndGet();
+            requests.incrementAndGet();
           } catch (Exception e) {
             e.printStackTrace();
           }
@@ -54,13 +52,17 @@ public class DynamoReaderTest {
     } catch (Exception e) {
       e.printStackTrace();
     } finally {
-      System.out.println("close[1]");
-      dynamoReader.close().get();
-      System.out.println("close[2]");
+      System.out.println("flush[1]");
+      dynamoReader.flush().get();
+      System.out.println("flush[2]");
 
       log(System.currentTimeMillis()-t0, "ms");
 
-      log("counter", counter);
+      log("requests", requests);
+
+      System.out.println("close[1]");
+      AwsSdkTwo.dynamo.close();
+      System.out.println("close[2]");
 
     }
 

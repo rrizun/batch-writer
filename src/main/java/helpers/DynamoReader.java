@@ -79,26 +79,7 @@ public class DynamoReader {
 
   private final String tableName;
 
-  private final NettyNioAsyncHttpClient.Builder httpClientBuilder = NettyNioAsyncHttpClient.builder()
-  //
-  // .maxConcurrency(50*Runtime.getRuntime().availableProcessors())
-  //
-  // .maxPendingConnectionAcquires(10_000*Runtime.getRuntime().availableProcessors())
-  ;
-
-  private final ClientAsyncConfiguration clientAsyncConfiguration = ClientAsyncConfiguration.builder()
-  //
-  .advancedOption(SdkAdvancedAsyncClientOption.FUTURE_COMPLETION_EXECUTOR, MoreExecutors.directExecutor())
-  //
-  .build();
-
-  private final DynamoDbAsyncClient dynamo = DynamoDbAsyncClient.builder()
-  //
-  .httpClientBuilder(httpClientBuilder)
-  //
-  .asyncConfiguration(clientAsyncConfiguration)
-  //
-  .build();
+  private final DynamoDbAsyncClient dynamo;
 
   private final Object lock = new Object();
   private final Holder<Set<Map<String, AttributeValue>>> setHolder = new Holder<>(new HashSet<>());
@@ -119,37 +100,31 @@ public class DynamoReader {
    * 
    * @param tableName
    */
-  public DynamoReader(String tableName) {
+  public DynamoReader(String tableName, DynamoDbAsyncClient dynamo) {
     log("ctor");
     this.tableName = tableName;
+    this.dynamo = dynamo;
   }
 
-  /**
-   * start
-   */
-  public ListenableFuture<Void> start() {
-    log("start");
-    return Futures.immediateVoidFuture();
-  }
+  // /**
+  //  * start
+  //  */
+  // public ListenableFuture<Void> start() {
+  //   log("start");
+  //   return Futures.immediateVoidFuture();
+  // }
 
   /**
    * close
    */
-  public ListenableFuture<Void> close() {
+  public ListenableFuture<Void> flush() {
     stats("close");
     return new VoidFuture() {
       {
         synchronized (lock) {
           tryToBatch(setHolder.reset(new HashSet<>()));
-          Futures.allAsList(allFutures.values()).addListener(() -> {
-            try {
-              dynamo.close();
-              set(Defaults.defaultValue(Void.class));
-            } catch (Exception e) {
-              setException(e);
-            } finally {
-              stats("close");
-            }
+          Futures.successfulAsList(allFutures.values()).addListener(() -> {
+            set(Defaults.defaultValue(Void.class));
           }, MoreExecutors.directExecutor());
         }
       }
