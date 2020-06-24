@@ -10,6 +10,9 @@ import com.google.common.collect.*;
 import com.google.common.util.concurrent.*;
 import com.spotify.futures.*;
 
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.Metrics;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import software.amazon.awssdk.core.client.config.*;
 import software.amazon.awssdk.http.nio.netty.*;
 import software.amazon.awssdk.services.dynamodb.*;
@@ -21,20 +24,17 @@ public class DynamoWriter {
     private final String tableName;
     private final DynamoDbAsyncClient dynamo;
 
-    private AtomicInteger busy = new AtomicInteger();
     // private final Object lock = new Object();
-    // private final ConcurrentSkipListSet<String> asdf = new
-    // ConcurrentSkipListSet<>();
+    private AtomicInteger busy = new AtomicInteger();
 
-    private final Set<WriteRequest> workingSet = new HashSet<>();
-    private final Map<WriteRequest, VoidFuture> allFutures = Maps.newConcurrentMap();
+    private final Set<WriteRequest> workingSet = new HashSet<>(); // synchronized
+    private final Map<WriteRequest, VoidFuture> allFutures = new ConcurrentHashMap<>();
 
     private final MyMeter requestMeter = new MyMeter();
     private final MyMeter successMeter = new MyMeter();
     private final MyMeter failureMeter = new MyMeter();
 
     private final MyMeter wcuMeter = new MyMeter();
-    // private final MyMeter unprocessedItemMeter = new MyMeter();
 
     /**
      * ctor
@@ -45,6 +45,7 @@ public class DynamoWriter {
         log("ctor");
         this.tableName = tableName;
         this.dynamo = dynamo;
+        Metrics.addRegistry(new SimpleMeterRegistry());
     }
 
     /**
@@ -58,36 +59,36 @@ public class DynamoWriter {
         return Futures.immediateVoidFuture();
     }
 
-    // /**
-    //  * close
-    //  * 
-    //  * @return
-    //  * @throws Exception
-    //  */
-    // public ListenableFuture<Void> close() throws Exception {
-    //     stats("close[1]");
-    //     return new AbstractFuture<Void>() {
-    //         {
-    //             // synchronized (lock)
-    //             {
-    //                 doBatchWriteItem(addAndBatch(null));
-    //                 Futures.allAsList(allFutures.values()).addListener(() -> {
-    //                     // synchronized (lock)
-    //                     {
-    //                         try {
-    //                             dynamo.close();
-    //                         } catch (Exception e) {
-    //                             setException(e);
-    //                         } finally {
-    //                             stats("close[2]");
-    //                             set(Defaults.defaultValue(Void.class));
-    //                         }
-    //                     }
-    //                 }, MoreExecutors.directExecutor());
-    //             }
-    //         }
-    //     };
-    // }
+                // /**
+                //  * close
+                //  * 
+                //  * @return
+                //  * @throws Exception
+                //  */
+                // public ListenableFuture<Void> close() throws Exception {
+                //     stats("close[1]");
+                //     return new AbstractFuture<Void>() {
+                //         {
+                //             // synchronized (lock)
+                //             {
+                //                 doBatchWriteItem(addAndBatch(null));
+                //                 Futures.allAsList(allFutures.values()).addListener(() -> {
+                //                     // synchronized (lock)
+                //                     {
+                //                         try {
+                //                             dynamo.close();
+                //                         } catch (Exception e) {
+                //                             setException(e);
+                //                         } finally {
+                //                             stats("close[2]");
+                //                             set(Defaults.defaultValue(Void.class));
+                //                         }
+                //                     }
+                //                 }, MoreExecutors.directExecutor());
+                //             }
+                //         }
+                //     };
+                // }
 
     /**
      * flush
@@ -99,13 +100,16 @@ public class DynamoWriter {
         log("flush");
         return new AbstractFuture<Void>() {
             {
-                doBatchWriteItem(addAndBatch(null));
-                Futures.successfulAsList(allFutures.values()).addListener(() -> {
-                    // synchronized (lock)
-                    {
-                        set(Defaults.defaultValue(Void.class));
-                    }
-                }, MoreExecutors.directExecutor());
+                // synchronized (lock)
+                {
+                    doBatchWriteItem(addAndBatch(null));
+                    Futures.successfulAsList(allFutures.values()).addListener(() -> {
+                        // synchronized (lock)
+                        {
+                            set(Defaults.defaultValue(Void.class));
+                        }
+                    }, MoreExecutors.directExecutor());
+                }
             }
         };
     }
@@ -119,33 +123,37 @@ public class DynamoWriter {
     public ListenableFuture<Void> addPutItem(Map<String, AttributeValue> item) {
         return new VoidFuture() {
             {
-                WriteRequest writeRequest = WriteRequest.builder().putRequest(PutRequest.builder().item(item).build())
-                        .build();
-                allFutures.put(writeRequest, this);
-                doBatchWriteItem(addAndBatch(writeRequest));
+                // synchronized (lock)
+                {
+                    WriteRequest writeRequest = WriteRequest.builder().putRequest(PutRequest.builder().item(item).build()).build();
+                    allFutures.put(writeRequest, this);
+                    doBatchWriteItem(addAndBatch(writeRequest));
+                }
             }
         };
     }
 
-    /**
-     * addDeleteItem
-     * 
-     * @param key
-     * @return
-     */
-    public ListenableFuture<Void> addDeleteItem(Map<String, AttributeValue> key) {
-        return new VoidFuture() {
-            {
-                WriteRequest writeRequest = WriteRequest.builder()
-                        .deleteRequest(DeleteRequest.builder().key(key).build()).build();
-                allFutures.put(writeRequest, this);
-                doBatchWriteItem(addAndBatch(writeRequest));
-            }
-        };
-    }
+    // /**
+    //  * addDeleteItem
+    //  * 
+    //  * @param key
+    //  * @return
+    //  */
+    // public ListenableFuture<Void> addDeleteItem(Map<String, AttributeValue> key) {
+    //     return new VoidFuture() {
+    //         {
+    //             synchronized (lock) {
+    //                 WriteRequest writeRequest = WriteRequest.builder().deleteRequest(DeleteRequest.builder().key(key).build()).build();
+    //                 allFutures.put(writeRequest, this);
+    //                 doBatchWriteItem(addAndBatch(writeRequest));
+    //             }
+    //         }
+    //     };
+    // }
 
     private ImmutableSet<WriteRequest> addAndBatch(WriteRequest writeRequest) {
-        synchronized (workingSet) {
+        synchronized (workingSet)
+        {
             if (writeRequest != null)
                 workingSet.add(writeRequest);
             if (workingSet.size() == 25) {
@@ -191,9 +199,9 @@ public class DynamoWriter {
 
             busy.incrementAndGet();
             responseFuture.addListener(() -> {
+                busy.decrementAndGet();
                 // synchronized (lock)
                 {
-                    busy.decrementAndGet();
                     try {
                         BatchWriteItemResponse batchWriteItemResponse = responseFuture.get();
 
@@ -241,7 +249,7 @@ public class DynamoWriter {
     }
 
     private void stats(String s) {
-        String state = String.format("[%s/%s/%s]", busy, workingSet.size(), allFutures.size());
+        String state = String.format("[%s/%s]", busy, allFutures.size());
         log(s, state, "request", requestMeter, "success", successMeter, "failure", failureMeter, "wcu", wcuMeter);
         // log(s, "request", requestMeter, "success", successMeter, "failure", failureMeter, "inFlight", allFutures.size(), "rcu", rcuMeter, "unprocessedKey", unprocessedKeyMeter);
       }
