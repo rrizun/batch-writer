@@ -10,6 +10,7 @@ dependencies {
 	implementation "com.google.guava:guava:+"
 	implementation "com.spotify:futures-extra:+"
 	implementation 'com.codahale.metrics:metrics-core:+'
+  implementation 'io.micrometer:micrometer-registry-atlas:latest.release'
 
     // aws sdk 2
 	implementation platform("software.amazon.awssdk:bom:+")
