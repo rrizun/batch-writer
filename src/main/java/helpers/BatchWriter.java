@@ -5,6 +5,8 @@ import java.time.*;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.*;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.zip.*;
 
 import com.google.common.hash.*;
@@ -216,16 +218,39 @@ public class BatchWriter {
             stats("publishRequest");
     }
 
+    static long parseRate(String... args) {
+        Pattern p = Pattern.compile("([0-9]+)tps");
+        for (String arg : args) {
+            Matcher m = p.matcher(arg);
+            if (m.matches())
+                return Long.parseLong(m.group(1));
+        }
+        return 128;
+    }
+
+    static long parseDuration(String... args) {
+        Pattern p = Pattern.compile("([0-9]+)s");
+        for (String arg : args) {
+            Matcher m = p.matcher(arg);
+            if (m.matches())
+                return Long.parseLong(m.group(1));
+        }
+        return 5;
+    }
+
     public static void main(String... args) throws Exception {
         AtomicLong requests = new AtomicLong();
         AtomicLong responses = new AtomicLong();
         final long t0 = System.currentTimeMillis();
         try {
-            final long rate = args.length > 0 ? Long.parseLong(args[0]) : 7500;
+            final long rate = parseRate(args);
+            System.out.println("rate="+rate);
+            final long seconds = parseDuration(args);
+            System.out.println("seconds="+seconds);
             final ExecutorService executor = Executors.newCachedThreadPool();
             try {
-                // int coreCount = 2;
-                int coreCount = Runtime.getRuntime().availableProcessors();
+                int coreCount = 1;
+                // int coreCount = Runtime.getRuntime().availableProcessors();
                 for (int core = 0; core < coreCount; ++core) {
                     executor.execute(() -> {
                         try {
@@ -233,7 +258,7 @@ public class BatchWriter {
                             topicWriter.start();
                             try {
                                 final RateLimiter rateLimiter = RateLimiter.create(rate / coreCount); // per second
-                                for (long i = 0; i < 300 * rateLimiter.getRate(); ++i) {
+                                for (long i = 0; i < seconds * rateLimiter.getRate(); ++i) {
                                     rateLimiter.acquire();
 
                                     JsonObject userRecord = new JsonObject();
