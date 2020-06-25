@@ -225,7 +225,7 @@ public class BatchWriter {
             if (m.matches())
                 return Long.parseLong(m.group(1));
         }
-        return 128;
+        return 1;
     }
 
     static long parseDuration(String... args) {
@@ -235,7 +235,7 @@ public class BatchWriter {
             if (m.matches())
                 return Long.parseLong(m.group(1));
         }
-        return 5;
+        return 1;
     }
 
     public static void main(String... args) throws Exception {
