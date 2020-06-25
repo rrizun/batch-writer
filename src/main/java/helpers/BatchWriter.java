@@ -224,8 +224,8 @@ public class BatchWriter {
             final long rate = args.length > 0 ? Long.parseLong(args[0]) : 7500;
             final ExecutorService executor = Executors.newCachedThreadPool();
             try {
-                int coreCount = 2;
-                // int coreCount = Runtime.getRuntime().availableProcessors();
+                // int coreCount = 2;
+                int coreCount = Runtime.getRuntime().availableProcessors();
                 for (int core = 0; core < coreCount; ++core) {
                     executor.execute(() -> {
                         try {
@@ -233,7 +233,7 @@ public class BatchWriter {
                             topicWriter.start();
                             try {
                                 final RateLimiter rateLimiter = RateLimiter.create(rate / coreCount); // per second
-                                for (long i = 0; i < 25 * rateLimiter.getRate(); ++i) {
+                                for (long i = 0; i < 300 * rateLimiter.getRate(); ++i) {
                                     rateLimiter.acquire();
 
                                     JsonObject userRecord = new JsonObject();
