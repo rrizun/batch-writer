@@ -213,7 +213,7 @@ public class BatchWriter {
             baos.reset();
             jsonWriter = new JsonWriter(new OutputStreamWriter(baos));
 
-            stats("publishRequst");
+            stats("publishRequest");
     }
 
     public static void main(String... args) throws Exception {
