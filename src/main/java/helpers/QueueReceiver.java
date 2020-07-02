@@ -26,7 +26,7 @@ public class QueueReceiver {
 
   public static void main(String... args) throws Exception {
     int cores = Runtime.getRuntime().availableProcessors();
-    final String queueUrl = "https://us-east-2.queue.amazonaws.com/743203956339/DlcmStack-InputEventQueueDB57F075-1PG9FW17QDZSN";
+    final String queueUrl = "https://us-east-2.queue.amazonaws.com/743203956339/DlcmStack-DlcmInputQueue159006CA-ZYW850D9C4E";
     // final ExecutorService executor = Executors.newCachedThreadPool();
     for (int core = 0; core < cores; ++core) {
       new Thread() {
@@ -48,14 +48,6 @@ public class QueueReceiver {
         }
       }.start();
     }
-
-    // final QueueReceiver queueReceiver = new QueueReceiver("https://us-east-2.queue.amazonaws.com/743203956339/DlcmStack-InputEventQueueDB57F075-1PG9FW17QDZSN");
-    // try {
-    //   queueReceiver.start();
-    //   Thread.sleep(Long.MAX_VALUE);
-    // } finally {
-    //   queueReceiver.close();
-    // }
   }
 
   private final String queueUrl;

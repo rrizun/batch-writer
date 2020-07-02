@@ -5,6 +5,7 @@ import java.time.*;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.*;
+import java.util.function.Function;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.zip.*;
@@ -20,6 +21,18 @@ import software.amazon.awssdk.core.client.config.*;
 import software.amazon.awssdk.http.nio.netty.*;
 import software.amazon.awssdk.services.sns.*;
 import software.amazon.awssdk.services.sns.model.*;
+
+interface DlcmHelper {
+
+    public void start();
+    public void close();
+
+    // send dlcm events to dlcm
+    abstract ListenableFuture<Void> sendEvents(List<JsonObject> events);
+    
+    // register dlcm advice recever
+    abstract void onReceiveAdvice(Function<List<JsonObject>, ListenableFuture<Void>> handler);
+}
 
 public class BatchWriter {
 
@@ -39,6 +52,11 @@ public class BatchWriter {
     // private static final int DEFAULT_MAX_CONNECTIONS = 50;
     // private static final int DEFAULT_MAX_CONNECTION_ACQUIRES = 10_000;
 
+    private final SdkClientConfiguration sdkClientConfiguration = SdkClientConfiguration.builder()
+    //
+    //
+    .build();
+
     private final NettyNioAsyncHttpClient.Builder httpClientBuilder = NettyNioAsyncHttpClient.builder()
     //
     // .maxConcurrency(250)
@@ -47,7 +65,7 @@ public class BatchWriter {
 
     private final ClientAsyncConfiguration clientAsyncConfiguration = ClientAsyncConfiguration.builder()
     //
-    .advancedOption(SdkAdvancedAsyncClientOption.FUTURE_COMPLETION_EXECUTOR, MoreExecutors.directExecutor())
+    .advancedOption(SdkAdvancedAsyncClientOption.FUTURE_COMPLETION_EXECUTOR, Runnable::run)
     //
     .build();
   
@@ -59,7 +77,7 @@ public class BatchWriter {
             //
             .build();
 
-    private final String topicArn = "arn:aws:sns:us-east-2:743203956339:DlcmStack-InputEventTopicC39C99C1-QBIUZXL0AN";
+    private final String topicArn = "arn:aws:sns:us-east-2:743203956339:DlcmStack-DlcmInputTopic3467A01D-QKHDLR7RYNO7";
 
     private final long periodSeconds = 5;
     private final MyMeter requestMeter = new MyMeter();
@@ -247,42 +265,35 @@ public class BatchWriter {
             System.out.println("rate="+rate);
             final long seconds = parseDuration(args);
             System.out.println("seconds="+seconds);
-            final ExecutorService executor = Executors.newCachedThreadPool();
+            final RateLimiter rateLimiter = RateLimiter.create(rate); // per second
+            final BatchWriter topicWriter = new BatchWriter(false);
+            topicWriter.start();
             try {
-                int coreCount = 1;
-                // int coreCount = Runtime.getRuntime().availableProcessors();
-                for (int core = 0; core < coreCount; ++core) {
-                    executor.execute(() -> {
-                        try {
-                            final BatchWriter topicWriter = new BatchWriter(false);
-                            topicWriter.start();
-                            try {
-                                final RateLimiter rateLimiter = RateLimiter.create(rate / coreCount); // per second
-                                for (long i = 0; i < seconds * rateLimiter.getRate(); ++i) {
-                                    rateLimiter.acquire();
+                for (long i = 0; i < seconds; ++i) {
+                    try {
+                        for (long j = 0; j < rate; ++j) {
+                            rateLimiter.acquire();
 
-                                    JsonObject userRecord = new JsonObject();
-                                    String key = Hashing.sha256().hashLong(i % 1000000).toString();
-
-                                    userRecord.addProperty("entityKey", key);
-                                    userRecord.addProperty("entityType", "/foo/bar/baz");
-                                    userRecord.addProperty("version", System.currentTimeMillis());
-
-                                    requests.incrementAndGet();
-                                    topicWriter.addToBatch(userRecord).addListener(()->{
-                                        responses.incrementAndGet();
-                                    }, MoreExecutors.directExecutor());
-                                }
-                            } finally {
-                                topicWriter.close();
-                            }
-                        } catch (Exception e) {
-                            throw new RuntimeException(e);
+                            JsonObject userRecord = new JsonObject();
+                            String key = Hashing.sha256().hashLong(j).toString();
+    
+                            userRecord.addProperty("entityKey", key);
+                            userRecord.addProperty("entityType", "/foo/bar/baz");
+                            userRecord.addProperty("version", System.currentTimeMillis());
+                            // userRecord.addProperty("deleted", true);
+    
+                            requests.incrementAndGet();
+                            topicWriter.addToBatch(userRecord).addListener(()->{
+                                responses.incrementAndGet();
+                            }, MoreExecutors.directExecutor());
                         }
-                    });
+                    } finally {
+                    }
                 }
+            } catch (Exception e) {
+                throw new RuntimeException(e);
             } finally {
-                MoreExecutors.shutdownAndAwaitTermination(executor, Duration.ofMillis(Long.MAX_VALUE));
+                topicWriter.close();
             }
         } finally {
             System.out.println(requests + " / " + responses);
