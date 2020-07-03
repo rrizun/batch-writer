@@ -22,18 +22,6 @@ import software.amazon.awssdk.http.nio.netty.*;
 import software.amazon.awssdk.services.sns.*;
 import software.amazon.awssdk.services.sns.model.*;
 
-interface DlcmHelper {
-
-    public void start();
-    public void close();
-
-    // send dlcm events to dlcm
-    abstract ListenableFuture<Void> sendEvents(List<JsonObject> events);
-    
-    // register dlcm advice recever
-    abstract void onReceiveAdvice(Function<List<JsonObject>, ListenableFuture<Void>> handler);
-}
-
 public class BatchWriter {
 
     // config
@@ -79,7 +67,6 @@ public class BatchWriter {
 
     private final String topicArn = "arn:aws:sns:us-east-2:743203956339:DlcmStack-DlcmInputTopic3467A01D-QKHDLR7RYNO7";
 
-    private final long periodSeconds = 5;
     private final MyMeter requestMeter = new MyMeter();
     private final MyMeter successMeter = new MyMeter();
     private final MyMeter failureMeter = new MyMeter();
@@ -234,71 +221,6 @@ public class BatchWriter {
             jsonWriter = new JsonWriter(new OutputStreamWriter(baos));
 
             stats("publishRequest");
-    }
-
-    static long parseRate(String... args) {
-        Pattern p = Pattern.compile("([0-9]+)tps");
-        for (String arg : args) {
-            Matcher m = p.matcher(arg);
-            if (m.matches())
-                return Long.parseLong(m.group(1));
-        }
-        return 1;
-    }
-
-    static long parseDuration(String... args) {
-        Pattern p = Pattern.compile("([0-9]+)s");
-        for (String arg : args) {
-            Matcher m = p.matcher(arg);
-            if (m.matches())
-                return Long.parseLong(m.group(1));
-        }
-        return 1;
-    }
-
-    public static void main(String... args) throws Exception {
-        AtomicLong requests = new AtomicLong();
-        AtomicLong responses = new AtomicLong();
-        final long t0 = System.currentTimeMillis();
-        try {
-            final long rate = parseRate(args);
-            System.out.println("rate="+rate);
-            final long seconds = parseDuration(args);
-            System.out.println("seconds="+seconds);
-            final RateLimiter rateLimiter = RateLimiter.create(rate); // per second
-            final BatchWriter topicWriter = new BatchWriter(false);
-            topicWriter.start();
-            try {
-                for (long i = 0; i < seconds; ++i) {
-                    try {
-                        for (long j = 0; j < rate; ++j) {
-                            rateLimiter.acquire();
-
-                            JsonObject userRecord = new JsonObject();
-                            String key = Hashing.sha256().hashLong(j).toString();
-    
-                            userRecord.addProperty("entityKey", key);
-                            userRecord.addProperty("entityType", "/foo/bar/baz");
-                            userRecord.addProperty("version", System.currentTimeMillis());
-                            // userRecord.addProperty("deleted", true);
-    
-                            requests.incrementAndGet();
-                            topicWriter.addToBatch(userRecord).addListener(()->{
-                                responses.incrementAndGet();
-                            }, MoreExecutors.directExecutor());
-                        }
-                    } finally {
-                    }
-                }
-            } catch (Exception e) {
-                throw new RuntimeException(e);
-            } finally {
-                topicWriter.close();
-            }
-        } finally {
-            System.out.println(requests + " / " + responses);
-            System.out.println((System.currentTimeMillis() - t0) + "ms");
-        }
     }
 
     private void stats(String s) {
