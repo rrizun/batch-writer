@@ -22,7 +22,7 @@ import software.amazon.awssdk.http.nio.netty.*;
 import software.amazon.awssdk.services.sns.*;
 import software.amazon.awssdk.services.sns.model.*;
 
-public class BatchWriter {
+public class TopicWriter {
 
     // config
     private final boolean compress; // true to use gzip compression
@@ -77,7 +77,7 @@ public class BatchWriter {
      * @param compress
      * @throws Exception
      */
-    public BatchWriter(boolean compress) throws Exception {
+    public TopicWriter(boolean compress) throws Exception {
         log("ctor");
         this.compress = compress;
     }

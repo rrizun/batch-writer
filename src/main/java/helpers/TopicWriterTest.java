@@ -9,7 +9,7 @@ import com.google.common.util.concurrent.MoreExecutors;
 import com.google.common.util.concurrent.RateLimiter;
 import com.google.gson.JsonObject;
 
-public class BatchWriterTest {
+public class TopicWriterTest {
   
   static long parseRate(String... args) {
     Pattern p = Pattern.compile("([0-9]+)tps");
@@ -41,7 +41,7 @@ public static void main(String... args) throws Exception {
         final long seconds = parseDuration(args);
         System.out.println("seconds="+seconds);
         final RateLimiter rateLimiter = RateLimiter.create(rate); // per second
-        final BatchWriter topicWriter = new BatchWriter(false);
+        final TopicWriter topicWriter = new TopicWriter(false);
         topicWriter.start();
         try {
             for (long i = 0; i < seconds; ++i) {
