@@ -17,12 +17,12 @@ public class MyMeter {
 
   public void mark(long value) {
     long now = now();
+    values.headMap(now - 900*1000).clear();
     values.computeIfAbsent(now, k -> new AtomicLong()).addAndGet(value);
-    // keep 15min worth
-    // values.keySet().retainAll(values.tailMap(now - 900*1000).keySet());
   }
 
   public long sum() {
+    values.headMap(now() - 900*1000).clear();
     long sum = 0;
     for (AtomicLong value : values.values())
       sum += value.get();

@@ -1,71 +1,40 @@
 package helpers;
 
-import java.io.*;
-import java.time.*;
-import java.util.*;
-import java.util.concurrent.*;
-import java.util.concurrent.atomic.*;
-import java.util.function.Function;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
-import java.util.zip.*;
+import java.io.ByteArrayOutputStream;
+import java.io.OutputStreamWriter;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.CompletableFuture;
 
-import com.google.common.hash.*;
-import com.google.common.io.*;
-import com.google.common.util.concurrent.*;
-import com.google.gson.*;
-import com.google.gson.stream.*;
-import com.spotify.futures.*;
+import com.google.common.collect.ArrayListMultimap;
+import com.google.common.collect.ImmutableMultimap;
+import com.google.common.collect.Lists;
+import com.google.common.collect.Multimap;
+import com.google.common.util.concurrent.Futures;
+import com.google.common.util.concurrent.ListenableFuture;
+import com.google.common.util.concurrent.MoreExecutors;
+import com.google.gson.JsonElement;
+import com.google.gson.stream.JsonWriter;
+import com.spotify.futures.CompletableFuturesExtra;
 
-import software.amazon.awssdk.core.client.config.*;
-import software.amazon.awssdk.http.nio.netty.*;
-import software.amazon.awssdk.services.sns.*;
-import software.amazon.awssdk.services.sns.model.*;
+import software.amazon.awssdk.services.sns.SnsAsyncClient;
+import software.amazon.awssdk.services.sns.model.PublishRequest;
+import software.amazon.awssdk.services.sns.model.PublishResponse;
 
 public class TopicWriter {
 
-    // config
-    private final boolean compress; // true to use gzip compression
-
-    private int busy; // in-flight
     private final Object lock = new Object();
 
     private ByteArrayOutputStream baos = new ByteArrayOutputStream();
     private JsonWriter jsonWriter = new JsonWriter(new OutputStreamWriter(baos));
 
-    private long nextFutureId;
-    private final Map<Long, VoidFuture> allFutures = new HashMap<>();
-    private final AtomicReference<Set<Long>> workingBatch = new AtomicReference<>(new HashSet<>());
+    // private final List<VoidFuture> flushFutures = Lists.newCopyOnWriteArrayList();
+    private final Multimap<JsonElement, VoidFuture> workingSet = ArrayListMultimap.create();
+    private final Multimap<JsonElement, VoidFuture> allFutures = ArrayListMultimap.create();
 
-    // private static final int DEFAULT_MAX_CONNECTIONS = 50;
-    // private static final int DEFAULT_MAX_CONNECTION_ACQUIRES = 10_000;
+    private final SnsAsyncClient snsClient = SnsAsyncClient.create();
 
-    private final SdkClientConfiguration sdkClientConfiguration = SdkClientConfiguration.builder()
-    //
-    //
-    .build();
-
-    private final NettyNioAsyncHttpClient.Builder httpClientBuilder = NettyNioAsyncHttpClient.builder()
-    //
-    // .maxConcurrency(250)
-    //
-    ;
-
-    private final ClientAsyncConfiguration clientAsyncConfiguration = ClientAsyncConfiguration.builder()
-    //
-    .advancedOption(SdkAdvancedAsyncClientOption.FUTURE_COMPLETION_EXECUTOR, Runnable::run)
-    //
-    .build();
-  
-    private final SnsAsyncClient snsClient = SnsAsyncClient.builder()
-            //
-            // .httpClientBuilder(httpClientBuilder)
-            //
-            .asyncConfiguration(clientAsyncConfiguration)
-            //
-            .build();
-
-    private final String topicArn = "arn:aws:sns:us-east-2:743203956339:DlcmStack-DlcmInputTopic3467A01D-QKHDLR7RYNO7";
+    private final String topicArn;// = "arn:aws:sns:us-east-2:743203956339:DlcmStack-DlcmInputTopic3467A01D-QKHDLR7RYNO7";
 
     private final MyMeter requestMeter = new MyMeter();
     private final MyMeter successMeter = new MyMeter();
@@ -74,31 +43,13 @@ public class TopicWriter {
     /**
      * ctor
      * 
-     * @param compress
+     * @param topicArn
      * @throws Exception
      */
-    public TopicWriter(boolean compress) throws Exception {
+    public TopicWriter(String topicArn) throws Exception {
         log("ctor");
-        this.compress = compress;
-    }
-
-    public void start() throws Exception {
-        log("start");
-        synchronized (lock) {
-            jsonWriter.beginArray();
-        }
-    }
-
-    public void close() throws Exception {
-        log("close");
-        synchronized (lock) {
-            jsonWriter.endArray();
-            sendBatchNow(); // does not block
-            while (busy > 0)
-                lock.wait();
-        }
-        snsClient.close();
-        stats("close");
+        this.topicArn = topicArn;
+        jsonWriter.beginArray();
     }
 
     public ListenableFuture<Void> flush() throws Exception {
@@ -107,11 +58,14 @@ public class TopicWriter {
             return new VoidFuture() {
                 {
                     jsonWriter.endArray();
-                    sendBatchNow();
-                    Futures.allAsList(allFutures.values()).addListener(()->{
-                        setVoid(); // set future result
-                    }, MoreExecutors.directExecutor());
+                    sendBatchNow(ImmutableMultimap.copyOf(workingSet)); // does not block
+                    workingSet.clear();
                     jsonWriter.beginArray();
+
+                    Futures.successfulAsList(allFutures.values()).addListener(()->{
+                        log("flush", stats());
+                        setVoid();
+                    }, MoreExecutors.directExecutor());
                 }
             };
         }
@@ -124,7 +78,8 @@ public class TopicWriter {
         synchronized (lock) {
             return new VoidFuture() {
                 {
-                    // requestMeter.mark(1);
+                    requestMeter.mark(1);
+
                     String jsonValue = jsonElement.toString();
 
                     final int MAX_MSG_LEN = 256 * 1024; // sns/sqs 256KB
@@ -135,7 +90,8 @@ public class TopicWriter {
 
                         // yes- publish now
                         jsonWriter.endArray();
-                        sendBatchNow(); // does not block
+                        sendBatchNow(ImmutableMultimap.copyOf(workingSet)); // does not block
+                        workingSet.clear();
                         jsonWriter.beginArray();
 
                     }
@@ -143,88 +99,98 @@ public class TopicWriter {
                     jsonWriter.jsonValue(jsonValue);
                     jsonWriter.flush();
 
-                    long id = ++nextFutureId;
-                    workingBatch.get().add(id); // add to batch
-                    allFutures.put(id, this); // save this future result
+                    workingSet.put(jsonElement, this); // add to batch
+                    allFutures.put(jsonElement, this); // save this future result
                 }
             };
         }
     }
 
-    private void sendBatchNow() throws Exception {
-        trace("sendBatchNow", workingBatch.get().size());
-
-        // if (userRecordFutures.get().size()==0)
-        // return Futures.immediateVoidFuture();
-
-            // STEP 1 close batch
-            jsonWriter.close();
-
-            // STEP 2 publish
-            String utf8 = new String(baos.toByteArray());
-            if (compress) {
-                ByteArrayOutputStream tmp = new ByteArrayOutputStream();
-                try (OutputStream out = new GZIPOutputStream(tmp)) {
-                    ByteStreams.copy(new ByteArrayInputStream(baos.toByteArray()), out);
-                }
-                utf8 = BaseEncoding.base64().encode(tmp.toByteArray());
-            }
-            // log(baos.size(), utf8[0].length());
-
-            trace(utf8.length(), utf8.substring(0, Math.min(utf8.length(), 120)));
-
-            PublishRequest publishRequest = PublishRequest.builder()
-                    //
-                    .topicArn(topicArn)
-                    //
-                    .message(utf8)
-                    //
-                    .build();
-
-            trace(publishRequest.message().length());
-
-            // final int finalUserRecordBatchCount = userRecordBatchCount; // take snapshot
-            final Set<Long> sentBatch = workingBatch.getAndSet(new HashSet<>());
-            // allFutures.putAll(copy);
-
-            ListenableFuture<PublishResponse> listenableFuture = lf(snsClient.publish(publishRequest));
-
-            requestMeter.mark(sentBatch.size());
-
-            ++busy;
-            listenableFuture.addListener(() -> {
+    private void sendBatchNow(ImmutableMultimap<JsonElement, VoidFuture> batch) throws Exception {
+        new Object() {
+            int busy; // in-flight
+            List<Runnable> defer = new ArrayList<>();
+            {
                 synchronized (lock) {
                     try {
-                        PublishResponse publishResponse = listenableFuture.get();
-                        trace(publishResponse);
-                        successMeter.mark(sentBatch.size());
-                        for (Long futureId : sentBatch) {
-                            allFutures.remove(futureId).setVoid();
-                        }
+                        // STEP 1 close batch
+                        jsonWriter.close();
+    
+                        // STEP 2 publish
+                        String utf8 = new String(baos.toByteArray());
+    
+                        trace(utf8.length(), utf8.substring(0, Math.min(utf8.length(), 120)));
+    
+                        PublishRequest publishRequest = PublishRequest.builder()
+                                //
+                                .topicArn(topicArn)
+                                //
+                                .message(utf8)
+                                //
+                                .build();
+    
+                        trace(publishRequest.message().length());
+    
+                        ListenableFuture<PublishResponse> listenableFuture = lf(snsClient.publish(publishRequest));
+                        ++busy;
+                        listenableFuture.addListener(() -> {
+                            synchronized (lock) {
+                                --busy;
+                                try {
+                                    PublishResponse publishResponse = listenableFuture.get();
+                                    trace(publishResponse);
+                                    for (VoidFuture voidFuture : batch.values()) {
+                                        // if (voidFuture.setVoid())
+                                            successMeter.mark(1);
+                                        defer.add(()->{
+                                            voidFuture.setVoid();
+                                        });
+                                    }
+                                } catch (Exception e) {
+                                    doCatch(e);
+                                } finally {
+                                    doFinally();
+                                }
+                            }
+                        }, MoreExecutors.directExecutor());
+    
+                        // STEP 3 start new batch
+                        baos.reset();
+                        jsonWriter = new JsonWriter(new OutputStreamWriter(baos));
                     } catch (Exception e) {
-                        log(e);
-                        // e.printStackTrace();
-                        failureMeter.mark(sentBatch.size());
-                        for (Long futureId : sentBatch) {
-                            allFutures.remove(futureId).setException(e);
-                        }
+                        doCatch(e);
                     } finally {
-                        --busy;
-                        lock.notifyAll(); // signal
-                        stats("publishResponse");
+                        doFinally();
                     }
                 }
-            }, MoreExecutors.directExecutor());
-
-            // STEP 3 start new batch
-            baos.reset();
-            jsonWriter = new JsonWriter(new OutputStreamWriter(baos));
-
-            stats("publishRequest");
+            }
+            void doCatch(Exception e) {
+                log(e);
+                e.printStackTrace();
+                // setException(e);
+                for (VoidFuture voidFuture : batch.values()) {
+                    // if (voidFuture.setException(e))
+                        failureMeter.mark(1);
+                    defer.add(()->{
+                        voidFuture.setException(e);
+                    });
+                }
+            }
+            void doFinally() {
+                if (busy==0) {
+                    --busy; // once
+                    log("doFinally", stats());
+                    for (Runnable runnable: defer)
+                        runnable.run();
+                    allFutures.values().removeAll(batch.values());
+                    // setVoid();
+                }
+            }
+        };
     }
 
-    private void stats(String s) {
-        log(s, String.format("[%s]", busy), "request", requestMeter, "success", successMeter, "failure", failureMeter);
+    private String stats() {
+        return new LogHelper(this).str("request", requestMeter, "success", successMeter, "failure", failureMeter);
     }
 
     private <T> ListenableFuture<T> lf(CompletableFuture<T> cf) {
