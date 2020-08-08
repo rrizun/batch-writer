@@ -44,8 +44,8 @@ public class MyMeter {
   }
 
   public String toString() {
-    return String.format("%s/%s", average(5), sum());
-    // return String.format("%s[%s/%s/%s]%s", average(5), average(60), average(300), average(900), sum());
+    return String.format("%s(%s/s)", sum(), average(15));
+    // return String.format("%s(%s/%s/%s)", sum(), average(1), average(5), average(15));
   }
 
 }
