@@ -98,10 +98,10 @@ public class TryReservior2 {
         }
     }
 
-    private void release(int permits) throws Exception {
+    private void release(int credits) throws Exception {
         synchronized (lock) {
             try {
-                creditsPerSecond += permits;
+                creditsPerSecond += credits;
             } finally {
                 lock.notifyAll();
             }
