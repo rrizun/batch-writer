@@ -1,26 +1,11 @@
 package helpers;
 
-import java.time.Duration;
-import java.util.Queue;
 import java.util.Random;
-import java.util.Map.Entry;
-import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.ConcurrentSkipListMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.locks.Condition;
-import java.util.concurrent.locks.Lock;
-import java.util.concurrent.locks.ReentrantLock;
 
 import com.codahale.metrics.Meter;
 import com.codahale.metrics.MetricRegistry;
-import com.codahale.metrics.Reservoir;
-import com.codahale.metrics.SlidingTimeWindowReservoir;
-import com.codahale.metrics.Timer;
-import com.codahale.metrics.Timer.Context;
-import com.google.common.collect.Queues;
-import com.google.common.util.concurrent.MoreExecutors;
 import com.google.common.util.concurrent.RateLimiter;
 
 public class TryReservior2 {
@@ -29,13 +14,15 @@ public class TryReservior2 {
     }
 
     private final ExecutorService executor = Executors.newCachedThreadPool();
-    private final double permitsPerSecond = 10000;
+
+    // config
+    private final double permitsPerSecond = 8000.0;
+    
+    // operational
+    private int creditsPerSecond;
+
     private final RateLimiter limiter = RateLimiter.create(permitsPerSecond);
-
-    private final MetricRegistry registry = new MetricRegistry();
-    private final Meter requestMeter = registry.meter("requestMeter");
-
-    private final MyMeter myMeter = new MyMeter();
+    private final LocalMeter myMeter = new LocalMeter();
 
     private final Object lock = new Object();
 
@@ -44,9 +31,11 @@ public class TryReservior2 {
         log("ctor");
 
         // requestMeter.mark();
-        // limiter.acquire(Double.valueOf(limiter.getRate()).intValue());
 
-        for (int i = 0; i < 400; ++i) {
+        // prime
+        limiter.acquire(Double.valueOf(limiter.getRate()).intValue());
+
+        for (int i = 0; i < 1; ++i) {
             executor.execute(() -> {
                 while (true) {
                     try {
@@ -59,10 +48,9 @@ public class TryReservior2 {
                         acquire(initial);
                         // log("acquired", permits);
 
-                        int consumed = initial;
-                        // int consumed = new Random().nextInt(128);
+                        int consumed = 128;
+                        // int consumed = new Random().nextInt(5);
 
-                        requestMeter.mark(consumed);
                         myMeter.mark(consumed);
                         // slidingTimeWindowReservoir.update(workDone);
 
@@ -72,7 +60,7 @@ public class TryReservior2 {
                         // log("released", permits-workDone);
 
                         // log("requestMeter", "mean", Double.valueOf(requestMeter.getMeanRate()).longValue(), "one", Double.valueOf(requestMeter.getOneMinuteRate()).longValue());
-                        log("meter", myMeter, "credits", credits);
+                        log("meter", myMeter, "credits", creditsPerSecond);
 
                     } catch (Exception e) {
                         throw new RuntimeException(e);
@@ -86,40 +74,34 @@ public class TryReservior2 {
 
     }
 
-    private int credits;
-
     private void acquire(int permits) throws Exception {
         synchronized (lock) {
             try {
-                while (!tryAcquire(permits)) {
-                    long timeout = Double.valueOf(1000*permits/permitsPerSecond).longValue();
-                    if (timeout>0)
-                        lock.wait(timeout);
-                    // log("waited", timeout);
-                    // lock.wait(Math.max(timeout, 1));
-                }
+                boolean acquired = false;
+                do {
+                    int credits = Math.min(permits, creditsPerSecond);
+                    if (permits - credits > 0) {
+                        acquired = limiter.tryAcquire(permits - credits);
+                        if (!acquired) {
+                            long timeout = Double.valueOf(1000*permits/permitsPerSecond).longValue();
+                            if (timeout > 0)
+                                lock.wait(timeout);
+                        }
+                    } else
+                        acquired = true;
+                    if (acquired)
+                        creditsPerSecond -= credits;
+                } while (!acquired);
             } finally {
                 lock.notifyAll();
             }
         }
     }
 
-    private boolean tryAcquire(int permits) {
-        int value = Math.min(permits, credits);
-        permits -= value;
-        if (permits > 0) {
-            // long timeout = Double.valueOf(1000*permits/permitsPerSecond).longValue();
-            if (!limiter.tryAcquire(permits))
-                return false;
-        }
-        credits -= value;
-        return true;
-    }
-
     private void release(int permits) throws Exception {
         synchronized (lock) {
             try {
-                credits += permits;
+                creditsPerSecond += permits;
             } finally {
                 lock.notifyAll();
             }

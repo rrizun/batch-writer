@@ -27,7 +27,7 @@ public class TryReservior {
 
     private final MetricRegistry registry = new MetricRegistry();
     private final Meter requestMeter = registry.meter("requestMeter");
-    private final MyMeter myMeter = new MyMeter();
+    private final LocalMeter myMeter = new LocalMeter();
 
     // private final SlidingTimeWindowReservoir slidingTimeWindowReservoir = new
     // SlidingTimeWindowReservoir(1, TimeUnit.SECONDS);

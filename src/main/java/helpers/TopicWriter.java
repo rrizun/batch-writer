@@ -36,9 +36,9 @@ public class TopicWriter {
 
     private final String topicArn;// = "arn:aws:sns:us-east-2:743203956339:DlcmStack-DlcmInputTopic3467A01D-QKHDLR7RYNO7";
 
-    private final MyMeter requestMeter = new MyMeter();
-    private final MyMeter successMeter = new MyMeter();
-    private final MyMeter failureMeter = new MyMeter();
+    private final LocalMeter requestMeter = new LocalMeter();
+    private final LocalMeter successMeter = new LocalMeter();
+    private final LocalMeter failureMeter = new LocalMeter();
 
     /**
      * ctor

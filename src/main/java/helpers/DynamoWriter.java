@@ -27,11 +27,11 @@ public class DynamoWriter {
     private final Set<WriteRequest> workingSet = new HashSet<>(); // synchronized
     private final Map<WriteRequest, VoidFuture> allFutures = new ConcurrentHashMap<>();
 
-    private final MyMeter requestMeter = new MyMeter();
-    private final MyMeter successMeter = new MyMeter();
-    private final MyMeter failureMeter = new MyMeter();
+    private final LocalMeter requestMeter = new LocalMeter();
+    private final LocalMeter successMeter = new LocalMeter();
+    private final LocalMeter failureMeter = new LocalMeter();
 
-    private final MyMeter wcuMeter = new MyMeter();
+    private final LocalMeter wcuMeter = new LocalMeter();
 
     /**
      * ctor

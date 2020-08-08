@@ -88,12 +88,12 @@ public class DynamoReader {
   // private int busy;
   // private final Object busyCond = new Object();
 
-  private final MyMeter requestMeter = new MyMeter();
-  private final MyMeter successMeter = new MyMeter();
-  private final MyMeter failureMeter = new MyMeter();
+  private final LocalMeter requestMeter = new LocalMeter();
+  private final LocalMeter successMeter = new LocalMeter();
+  private final LocalMeter failureMeter = new LocalMeter();
 
-  private final MyMeter rcuMeter = new MyMeter();
-  private final MyMeter unprocessedKeyMeter = new MyMeter();
+  private final LocalMeter rcuMeter = new LocalMeter();
+  private final LocalMeter unprocessedKeyMeter = new LocalMeter();
 
   /**
    * ctor

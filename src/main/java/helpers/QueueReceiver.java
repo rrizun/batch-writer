@@ -55,9 +55,9 @@ public class QueueReceiver {
   private final SqsAsyncClient sqsClient = SqsAsyncClient.create();
 
   private final long periodSeconds = 5;
-  private final MyMeter receiveMeter = new MyMeter();
-  private final MyMeter successMeter = new MyMeter();
-  private final MyMeter failureMeter = new MyMeter();
+  private final LocalMeter receiveMeter = new LocalMeter();
+  private final LocalMeter successMeter = new LocalMeter();
+  private final LocalMeter failureMeter = new LocalMeter();
 
   private boolean running;
 
