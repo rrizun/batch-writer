@@ -22,7 +22,7 @@ public class TryReservior2 {
     private int creditsPerSecond;
 
     private final RateLimiter limiter = RateLimiter.create(permitsPerSecond);
-    private final LocalMeter myMeter = new LocalMeter();
+    private final LocalMeter consumedMeter = new LocalMeter();
 
     private final Object lock = new Object();
 
@@ -51,7 +51,7 @@ public class TryReservior2 {
                         int consumed = 128;
                         // int consumed = new Random().nextInt(5);
 
-                        myMeter.mark(consumed);
+                        consumedMeter.mark(consumed);
                         // slidingTimeWindowReservoir.update(workDone);
 
                         // postRelease
@@ -60,7 +60,7 @@ public class TryReservior2 {
                         // log("released", permits-workDone);
 
                         // log("requestMeter", "mean", Double.valueOf(requestMeter.getMeanRate()).longValue(), "one", Double.valueOf(requestMeter.getOneMinuteRate()).longValue());
-                        log("meter", myMeter, "credits", creditsPerSecond);
+                        log("consumedMeter", consumedMeter);
 
                     } catch (Exception e) {
                         throw new RuntimeException(e);
