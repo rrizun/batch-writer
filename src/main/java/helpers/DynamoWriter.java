@@ -10,9 +10,6 @@ import com.google.common.collect.*;
 import com.google.common.util.concurrent.*;
 import com.spotify.futures.*;
 
-import io.micrometer.core.instrument.Counter;
-import io.micrometer.core.instrument.Metrics;
-import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import software.amazon.awssdk.core.client.config.*;
 import software.amazon.awssdk.http.nio.netty.*;
 import software.amazon.awssdk.services.dynamodb.*;
@@ -45,7 +42,6 @@ public class DynamoWriter {
         log("ctor");
         this.tableName = tableName;
         this.dynamo = dynamo;
-        Metrics.addRegistry(new SimpleMeterRegistry());
     }
 
     /**
