@@ -42,8 +42,8 @@ public class LocalMeter {
   }
 
   public String toString() {
-    // return String.format("%s(%s/s)", sum, avg(15));
-    return String.format("%s(%s/%s/%s/%s/%s/%s)", sum, avg(1), avg(5), avg(15), avg(60), avg(300), avg(900));
+    return String.format("%s(%s/s)", sum, avg(15));
+    // return String.format("%s(%s/%s/%s/%s/%s/%s)", sum, avg(1), avg(5), avg(15), avg(60), avg(300), avg(900));
   }
 
 }
