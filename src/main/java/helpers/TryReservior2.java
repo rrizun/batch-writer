@@ -16,7 +16,7 @@ public class TryReservior2 {
     private final ExecutorService executor = Executors.newCachedThreadPool();
 
     // config
-    private final double permitsPerSecond = 8000.0;
+    private final double permitsPerSecond = 2000.0;
     
     // operational
     private int creditsPerSecond;
@@ -48,8 +48,8 @@ public class TryReservior2 {
                         acquire(initial);
                         // log("acquired", permits);
 
-                        int consumed = 128;
-                        // int consumed = new Random().nextInt(5);
+                        // int consumed = 128;
+                        int consumed = new Random().nextInt(initial);
 
                         consumedMeter.mark(consumed);
                         // slidingTimeWindowReservoir.update(workDone);
@@ -77,7 +77,7 @@ public class TryReservior2 {
     private void acquire(int permits) throws Exception {
         synchronized (lock) {
             try {
-                boolean acquired = false;
+                boolean acquired = true;
                 do {
                     int credits = Math.min(permits, creditsPerSecond);
                     if (permits - credits > 0) {
@@ -87,8 +87,7 @@ public class TryReservior2 {
                             if (timeout > 0)
                                 lock.wait(timeout);
                         }
-                    } else
-                        acquired = true;
+                    }
                     if (acquired)
                         creditsPerSecond -= credits;
                 } while (!acquired);
