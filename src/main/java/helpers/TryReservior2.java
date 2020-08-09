@@ -16,7 +16,7 @@ public class TryReservior2 {
     private final ExecutorService executor = Executors.newCachedThreadPool();
 
     // config
-    private final double permitsPerSecond = 2000.0;
+    private final double permitsPerSecond = 12000.0;
     
     // operational
     private int creditsPerSecond;
@@ -35,32 +35,35 @@ public class TryReservior2 {
         // prime
         limiter.acquire(Double.valueOf(limiter.getRate()).intValue());
 
-        for (int i = 0; i < 1; ++i) {
+        for (int i = 0; i < 640; ++i) {
             executor.execute(() -> {
                 while (true) {
                     try {
 
                         // log("execute!");
                         final int initial = 128;
+                        // final int initial = Double.valueOf(permitsPerSecond).intValue();
 
                         // preAcquire
                         // log("acquire", permits);
                         acquire(initial);
                         // log("acquired", permits);
 
+                        Thread.sleep(new Random().nextInt(2450));
+
                         // int consumed = 128;
                         int consumed = new Random().nextInt(initial);
 
                         consumedMeter.mark(consumed);
-                        // slidingTimeWindowReservoir.update(workDone);
+                        // log("requestMeter", "mean", Double.valueOf(requestMeter.getMeanRate()).longValue(), "one", Double.valueOf(requestMeter.getOneMinuteRate()).longValue());
+                        log("consumedMeter", consumedMeter, permitsPerSecond, creditsPerSecond);
 
                         // postRelease
                         // log("release", permits-workDone);
                         release(initial - consumed);
                         // log("released", permits-workDone);
 
-                        // log("requestMeter", "mean", Double.valueOf(requestMeter.getMeanRate()).longValue(), "one", Double.valueOf(requestMeter.getOneMinuteRate()).longValue());
-                        log("consumedMeter", consumedMeter);
+                        Thread.sleep(new Random().nextInt(2450));
 
                     } catch (Exception e) {
                         throw new RuntimeException(e);
@@ -76,34 +79,28 @@ public class TryReservior2 {
 
     private void acquire(int permits) throws Exception {
         synchronized (lock) {
-            try {
-                boolean acquired = true;
-                do {
-                    int credits = Math.min(permits, creditsPerSecond);
-                    if (permits - credits > 0) {
-                        acquired = limiter.tryAcquire(permits - credits);
-                        if (!acquired) {
-                            long timeout = Double.valueOf(1000*permits/permitsPerSecond).longValue();
-                            if (timeout > 0)
-                                lock.wait(timeout);
-                        }
+            boolean acquired;
+            do {
+                int credits = Math.min(permits, creditsPerSecond);
+                if (permits - credits > 0) {
+                    acquired = limiter.tryAcquire(permits - credits);
+                    if (!acquired) {
+                        long timeout = Double.valueOf(1000 * permits / permitsPerSecond).longValue();
+                        if (timeout > 0)
+                            lock.wait(timeout);
                     }
-                    if (acquired)
-                        creditsPerSecond -= credits;
-                } while (!acquired);
-            } finally {
-                lock.notifyAll();
-            }
+                } else
+                    acquired = true;
+                if (acquired)
+                    creditsPerSecond -= credits;
+            } while (!acquired);
+            // log("acquire", permits, acquired);
         }
     }
 
     private void release(int credits) throws Exception {
         synchronized (lock) {
-            try {
-                creditsPerSecond += credits;
-            } finally {
-                lock.notifyAll();
-            }
+            creditsPerSecond += credits;
         }
     }
 
