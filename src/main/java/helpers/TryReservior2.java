@@ -4,8 +4,6 @@ import java.util.Random;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
-import com.codahale.metrics.Meter;
-import com.codahale.metrics.MetricRegistry;
 import com.google.common.util.concurrent.RateLimiter;
 
 public class TryReservior2 {
@@ -16,7 +14,7 @@ public class TryReservior2 {
     private final ExecutorService executor = Executors.newCachedThreadPool();
 
     // config
-    private final double permitsPerSecond = 12000.0;
+    private final double permitsPerSecond = 2000.0;
     
     // operational
     private int creditsPerSecond;
@@ -35,13 +33,13 @@ public class TryReservior2 {
         // prime
         limiter.acquire(Double.valueOf(limiter.getRate()).intValue());
 
-        for (int i = 0; i < 640; ++i) {
+        for (int i = 0; i < 160; ++i) {
             executor.execute(() -> {
                 while (true) {
                     try {
 
                         // log("execute!");
-                        final int initial = 128;
+                        final int initial = 25;
                         // final int initial = Double.valueOf(permitsPerSecond).intValue();
 
                         // preAcquire
@@ -49,10 +47,10 @@ public class TryReservior2 {
                         acquire(initial);
                         // log("acquired", permits);
 
-                        Thread.sleep(new Random().nextInt(2450));
+                        Thread.sleep(new Random().nextInt(500));
 
-                        // int consumed = 128;
-                        int consumed = new Random().nextInt(initial);
+                        int consumed = 25;
+                        // int consumed = new Random().nextInt(25);
 
                         consumedMeter.mark(consumed);
                         // log("requestMeter", "mean", Double.valueOf(requestMeter.getMeanRate()).longValue(), "one", Double.valueOf(requestMeter.getOneMinuteRate()).longValue());
@@ -63,7 +61,7 @@ public class TryReservior2 {
                         release(initial - consumed);
                         // log("released", permits-workDone);
 
-                        Thread.sleep(new Random().nextInt(2450));
+                        Thread.sleep(new Random().nextInt(2500));
 
                     } catch (Exception e) {
                         throw new RuntimeException(e);
@@ -94,7 +92,7 @@ public class TryReservior2 {
                 if (acquired)
                     creditsPerSecond -= credits;
             } while (!acquired);
-            // log("acquire", permits, acquired);
+            // log("acquired", permits, acquired);
         }
     }
 
