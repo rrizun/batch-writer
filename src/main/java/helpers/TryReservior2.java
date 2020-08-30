@@ -13,13 +13,9 @@ public class TryReservior2 {
 
     private final ExecutorService executor = Executors.newCachedThreadPool();
 
-    // config
-    private final double permitsPerSecond = 2000.0;
-    
-    // operational
-    private int creditsPerSecond;
+    private final RateLimiter limiter = RateLimiter.create(2000); // permitsPerSecond
+    private int creditsPerSecond; // operational
 
-    private final RateLimiter limiter = RateLimiter.create(permitsPerSecond);
     private final LocalMeter consumedMeter = new LocalMeter();
 
     private final Object lock = new Object();
@@ -31,7 +27,7 @@ public class TryReservior2 {
         // requestMeter.mark();
 
         // prime
-        limiter.acquire(Double.valueOf(limiter.getRate()).intValue());
+        limiter.acquire((int) limiter.getRate());
 
         for (int i = 0; i < 160; ++i) {
             executor.execute(() -> {
@@ -54,7 +50,7 @@ public class TryReservior2 {
 
                         consumedMeter.mark(consumed);
                         // log("requestMeter", "mean", Double.valueOf(requestMeter.getMeanRate()).longValue(), "one", Double.valueOf(requestMeter.getOneMinuteRate()).longValue());
-                        log("consumedMeter", consumedMeter, permitsPerSecond, creditsPerSecond);
+                        log("consumedMeter", consumedMeter, limiter.getRate(), creditsPerSecond);
 
                         // postRelease
                         // log("release", permits-workDone);
@@ -83,7 +79,7 @@ public class TryReservior2 {
                 if (permits - credits > 0) {
                     acquired = limiter.tryAcquire(permits - credits);
                     if (!acquired) {
-                        long timeout = Double.valueOf(1000 * permits / permitsPerSecond).longValue();
+                        long timeout = Double.valueOf(1000 * (permits - credits) / limiter.getRate()).longValue();
                         if (timeout > 0)
                             lock.wait(timeout);
                     }
