@@ -7,6 +7,7 @@ import com.google.common.hash.*;
 import com.google.common.util.concurrent.*;
 import com.google.gson.*;
 
+import software.amazon.awssdk.services.dynamodb.DynamoDbAsyncClient;
 import software.amazon.awssdk.services.dynamodb.model.*;
 
 public class DynamoReaderTest {
@@ -20,7 +21,7 @@ public class DynamoReaderTest {
     final long t0 = System.currentTimeMillis();
 
     AtomicLong requests = new AtomicLong();
-    final DynamoReader dynamoReader = new DynamoReader("DlcmStack-TableCD117FA1-10BX86V213J7Z", AwsSdkTwo.dynamo);
+    final DynamoReader dynamoReader = new DynamoReader("DlcmStack-TableCD117FA1-10BX86V213J7Z", DynamoDbAsyncClient.create());
 
     try {
 
@@ -61,7 +62,7 @@ public class DynamoReaderTest {
       log("requests", requests);
 
       System.out.println("close[1]");
-      AwsSdkTwo.dynamo.close();
+      // AwsSdkTwo.dynamo.close();
       System.out.println("close[2]");
 
     }

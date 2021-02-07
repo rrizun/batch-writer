@@ -9,6 +9,7 @@ import com.google.common.hash.*;
 import com.google.common.util.concurrent.*;
 import com.google.gson.*;
 
+import software.amazon.awssdk.services.dynamodb.DynamoDbAsyncClient;
 import software.amazon.awssdk.services.dynamodb.model.*;
 
 class MyMeta {
@@ -40,7 +41,7 @@ public class DynamoWriterTest {
     // start time
     final long t0 = System.currentTimeMillis();
 
-    final DynamoWriter dynamoWriter = new DynamoWriter(tableName, AwsSdkTwo.dynamo);
+    final DynamoWriter dynamoWriter = new DynamoWriter(tableName, DynamoDbAsyncClient.create());
     try {
       log("start");
       dynamoWriter.start();
@@ -73,7 +74,7 @@ public class DynamoWriterTest {
 
     } finally {
       log("close[1]");
-      AwsSdkTwo.dynamo.close();
+      // AwsSdkTwo.dynamo.close();
       log("close[2]");
 
     }

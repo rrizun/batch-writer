@@ -10,6 +10,7 @@ dependencies {
 	implementation "com.google.guava:guava:+"
 	implementation "com.spotify:futures-extra:+"
 	implementation 'com.codahale.metrics:metrics-core:+'
+implementation 'io.micrometer:micrometer-core:latest.release'
 
 				//   implementation 'io.micrometer:micrometer-registry-atlas:latest.release'
 
@@ -18,6 +19,7 @@ dependencies {
 	implementation "software.amazon.awssdk:dynamodb"
 	implementation "software.amazon.awssdk:sns"
 	implementation "software.amazon.awssdk:sqs"
+	implementation "software.amazon.awssdk:netty-nio-client"
 
 	implementation "org.slf4j:slf4j-api:+"
 	// implementation "org.slf4j:slf4j-jcl:+"
@@ -34,5 +36,5 @@ dependencies {
 }
 
 run {
-	mainClassName = System.getProperty("foo") ?: "dlcm.Main"
+	mainClassName = "helpers.ConcatenatedJsonTopicPublisher"
 }
