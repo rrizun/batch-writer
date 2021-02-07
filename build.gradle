@@ -31,10 +31,19 @@ implementation 'io.micrometer:micrometer-core:latest.release'
 					// To fix it i added this dependency runtime 'org.codehaus.groovy:groovy:2.4.15' in build.gradle
 
 
+    testImplementation 'org.junit.jupiter:junit-jupiter-api:+'
+    testImplementation 'org.junit.jupiter:junit-jupiter-engine:+'
 
 
 }
 
 run {
 	mainClassName = "helpers.ConcatenatedJsonTopicPublisher"
+}
+
+test {
+    useJUnitPlatform()
+    testLogging {
+        showStandardStreams = true
+    }
 }

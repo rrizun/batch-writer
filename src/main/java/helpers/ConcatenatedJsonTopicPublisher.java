@@ -6,14 +6,18 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Map.Entry;
 
+import com.google.common.base.Defaults;
 import com.google.common.collect.LinkedListMultimap;
 import com.google.common.collect.Multimap;
 import com.google.common.io.BaseEncoding;
+import com.google.common.util.concurrent.AbstractFuture;
 import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
+import com.google.common.util.concurrent.MoreExecutors;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonPrimitive;
+import com.spotify.futures.CompletableFuturesExtra;
 
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -21,11 +25,16 @@ import io.micrometer.core.instrument.Metrics;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import software.amazon.awssdk.services.sns.SnsAsyncClient;
 import software.amazon.awssdk.services.sns.model.PublishRequest;
+import software.amazon.awssdk.services.sns.model.PublishResponse;
 
 public class ConcatenatedJsonTopicPublisher {
 
-    private final String topicArn;
-    private final SnsAsyncClient snsClient = SnsAsyncClient.create();
+    public interface Transport {
+        int mtu();
+        ListenableFuture<Void> send(String message);
+    }
+
+    private final Transport transport;
     
     // preserves insertion order
     private final Multimap<JsonElement, VoidFuture> messages = LinkedListMultimap.create();
@@ -44,15 +53,15 @@ public class ConcatenatedJsonTopicPublisher {
      * @param topicArn
      * @throws Exception
      */
-    public ConcatenatedJsonTopicPublisher(String topicArn) throws Exception {
-        log("ctor", topicArn);
-        this.topicArn = topicArn;
+    public ConcatenatedJsonTopicPublisher(Transport transport) {
+        log("ctor");
+        this.transport = transport;
+
+        String topicArn = "TODOFIXMETODO";
 
         requestMeter = Metrics.counter("ConcatenatedJsonTopicPublisher.request", "topicArn", topicArn);
         successMeter = Metrics.counter("ConcatenatedJsonTopicPublisher.success", "topicArn", topicArn);
         failureMeter = Metrics.counter("ConcatenatedJsonTopicPublisher.failure", "topicArn", topicArn);
-
-        log(failureMeter.getClass());
     }
 
     public ListenableFuture<Void> request(JsonElement message) {
@@ -71,10 +80,13 @@ public class ConcatenatedJsonTopicPublisher {
                 run(() -> {
                     // STEP 1 partition
                     StringBuilder sb = new StringBuilder();
+                    //###TODO USE STRINGWRITER TO HANDLE CR/LF
+                    //###TODO USE STRINGWRITER TO HANDLE CR/LF
+                    //###TODO USE STRINGWRITER TO HANDLE CR/LF
                     Multimap<StringBuilder, VoidFuture> partitions = LinkedListMultimap.create();
                     for (Entry<JsonElement, VoidFuture> entry : messages.entries()) {
                         String jsonValue = entry.getKey().toString();
-                        if (sb.length() + jsonValue.length() > 256*1024) // sns/sqs max msg len
+                        if (sb.length() + jsonValue.length() > transport.mtu())
                             sb = new StringBuilder();
                         sb.append(jsonValue);
                         partitions.put(sb, entry.getValue());
@@ -83,15 +95,11 @@ public class ConcatenatedJsonTopicPublisher {
                     // STEP 2 publish partitions
                     for (Entry<StringBuilder, Collection<VoidFuture>> entry : partitions.asMap().entrySet()) {
                         run(() -> {
-                            String message = entry.getKey().toString();
-                            PublishRequest publishRequest = PublishRequest.builder()
-                                    //
-                                    .topicArn(topicArn).message(message).build();
-                            return lf(snsClient.publish(publishRequest));
-                        }, publishResponse -> {
+                            return transport.send(entry.getKey().toString());
+                        }, sendResponse -> {
                             for (VoidFuture voidFuture : entry.getValue()) {
                                 successMeter.increment();
-                                defer.add(()->{
+                                defer.add(() -> {
                                     voidFuture.setVoid();
                                 });
                             }
@@ -99,13 +107,13 @@ public class ConcatenatedJsonTopicPublisher {
                             log(e.getMessage());
                             for (VoidFuture voidFuture : entry.getValue()) {
                                 failureMeter.increment();
-                                defer.add(()->{
+                                defer.add(() -> {
                                     voidFuture.setException(e);
                                 });
                             }
                         }, () -> {
                             log("stats", stats());
-                            for (Runnable runnable: defer)
+                            for (Runnable runnable : defer)
                                 runnable.run();
                         });
                     }
@@ -117,7 +125,8 @@ public class ConcatenatedJsonTopicPublisher {
     }
 
     private String stats() {
-        return new LogHelper(this).str("request", requestMeter.count(), "success", successMeter.count(), "failure", failureMeter.count());
+        return new LogHelper(this).str("request", requestMeter.count(), "success", successMeter.count(), "failure",
+                failureMeter.count());
     }
 
     private void log(Object... args) {
@@ -125,10 +134,42 @@ public class ConcatenatedJsonTopicPublisher {
     }
 
     public static void main(String... args) throws Exception {
-        Metrics.addRegistry(new SimpleMeterRegistry());
-        final ConcatenatedJsonTopicPublisher topicPublisher = new ConcatenatedJsonTopicPublisher("arn:aws:sns:us-east-1:343892718819:MyServiceDev-Myservice-TopicBFC7AF6E-QFKBW7OHVXNZ");
+
+        ConcatenatedJsonTopicPublisher.Transport aws = new ConcatenatedJsonTopicPublisher.Transport() {
+            SnsAsyncClient snsClient = SnsAsyncClient.create();
+            String topicArn = "arn:aws:sns:us-east-1:343892718819:MyServiceDev-Myservice-TopicBFC7AF6E-QFKBW7OHVXNZ";
+    
+            @Override
+            public int mtu() {
+                return 256 * 1024;
+            }
+    
+            @Override
+            public ListenableFuture<Void> send(String message) {
+                return new AbstractFuture<Void>() {
+                    {
+                        PublishRequest publishRequest = PublishRequest.builder()
+                                //
+                                .topicArn(topicArn).message(message).build();
+    
+                        ListenableFuture<PublishResponse> lf = CompletableFuturesExtra
+                                .toListenableFuture(snsClient.publish(publishRequest));
+                        lf.addListener(() -> {
+                            try {
+                                lf.get();
+                                set(Defaults.defaultValue(Void.class));
+                            } catch (Exception e) {
+                                setException(e);
+                            }
+                        }, MoreExecutors.directExecutor());
+                    }
+                };
+            }
+        };
+    
+        final ConcatenatedJsonTopicPublisher topicPublisher = new ConcatenatedJsonTopicPublisher(aws);
         try {
-            for (int i = 0; i < 250000; ++i) {
+            for (int i = 0; i < 25000; ++i) {
                 topicPublisher.request(new JsonPrimitive(random()));
             }
         } finally {
@@ -142,6 +183,10 @@ public class ConcatenatedJsonTopicPublisher {
         byte[] bytes = new byte[18];
         new SecureRandom().nextBytes(bytes);
         return BaseEncoding.base64Url().encode(bytes);
+    }
+
+    static {
+        Metrics.addRegistry(new SimpleMeterRegistry());
     }
 
 }
