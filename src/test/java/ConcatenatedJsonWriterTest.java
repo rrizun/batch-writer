@@ -1,42 +1,48 @@
 import static org.junit.jupiter.api.Assertions.*;
 
+import java.util.ArrayList;
+import java.util.List;
+
 import com.google.common.base.Defaults;
 import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
 import com.google.gson.JsonObject;
+import com.google.gson.JsonPrimitive;
 
 import org.junit.jupiter.api.Test;
 
-import helpers.ConcatenatedJsonTopicPublisher;
-import helpers.FutureRunner;
+import helpers.ConcatenatedJsonWriter;
 
 public class ConcatenatedJsonWriterTest {
 
-    private String sentMessage;
+    private final List<String> sentMessages = new ArrayList<>();
 
-    ConcatenatedJsonTopicPublisher.Transport transport = new ConcatenatedJsonTopicPublisher.Transport() {
+    ConcatenatedJsonWriter.Transport transport = new ConcatenatedJsonWriter.Transport() {
 
         @Override
         public int mtu() {
-            return 2;
+            return 6;
         }
 
         @Override
         public ListenableFuture<Void> send(String message) {
             if (message.length()>mtu())
                 return Futures.immediateFailedFuture(new Exception("mtu"));
-            sentMessage = message;
+            sentMessages.add(message);
             return Futures.immediateFuture(Defaults.defaultValue(Void.class));
         }
     };
     
-    private final ConcatenatedJsonTopicPublisher writer = new ConcatenatedJsonTopicPublisher(transport);
+    private final ConcatenatedJsonWriter writer = new ConcatenatedJsonWriter(transport);
 
     @Test
     public void test() throws Exception {
-        ListenableFuture<Void> request = writer.request(new JsonObject());
-        writer.publish().get();
-        request.get();
-        assertEquals("{}", sentMessage);
+        writer.request(new JsonPrimitive("1"));
+        writer.send().get();
+        assertEquals("\"1\"", sentMessages.get(0));
+
+        writer.request(new JsonPrimitive("2"));
+        writer.send().get();
+        assertEquals("\"2\"", sentMessages.get(1));
     }
 }

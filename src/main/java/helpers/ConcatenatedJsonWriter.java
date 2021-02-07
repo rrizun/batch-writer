@@ -7,6 +7,7 @@ import java.util.List;
 import java.util.Map.Entry;
 
 import com.google.common.base.Defaults;
+import com.google.common.collect.ImmutableMultimap;
 import com.google.common.collect.LinkedListMultimap;
 import com.google.common.collect.Multimap;
 import com.google.common.io.BaseEncoding;
@@ -15,19 +16,17 @@ import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
 import com.google.common.util.concurrent.MoreExecutors;
 import com.google.gson.JsonElement;
-import com.google.gson.JsonObject;
 import com.google.gson.JsonPrimitive;
 import com.spotify.futures.CompletableFuturesExtra;
 
 import io.micrometer.core.instrument.Counter;
-import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Metrics;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import software.amazon.awssdk.services.sns.SnsAsyncClient;
 import software.amazon.awssdk.services.sns.model.PublishRequest;
 import software.amazon.awssdk.services.sns.model.PublishResponse;
 
-public class ConcatenatedJsonTopicPublisher {
+public class ConcatenatedJsonWriter {
 
     public interface Transport {
         int mtu();
@@ -39,10 +38,6 @@ public class ConcatenatedJsonTopicPublisher {
     // preserves insertion order
     private final Multimap<JsonElement, VoidFuture> messages = LinkedListMultimap.create();
 
-    // private final LocalMeter requestMeter = new LocalMeter();
-    // private final LocalMeter successMeter = new LocalMeter();
-    // private final LocalMeter failureMeter = new LocalMeter();
-
     private final Counter requestMeter;
     private final Counter successMeter;
     private final Counter failureMeter;
@@ -53,7 +48,7 @@ public class ConcatenatedJsonTopicPublisher {
      * @param topicArn
      * @throws Exception
      */
-    public ConcatenatedJsonTopicPublisher(Transport transport) {
+    public ConcatenatedJsonWriter(Transport transport) {
         log("ctor");
         this.transport = transport;
 
@@ -72,8 +67,12 @@ public class ConcatenatedJsonTopicPublisher {
         return vf;
     }
 
-    public ListenableFuture<Void> publish() throws Exception {
-        log("flush");
+    public ListenableFuture<Void> send() throws Exception {
+        log("send");
+
+        Multimap<JsonElement, VoidFuture> copyOfMessage = ImmutableMultimap.copyOf(messages);
+        messages.clear();
+
         return new FutureRunner() {
             List<Runnable> defer = new ArrayList<>();
             {
@@ -84,7 +83,7 @@ public class ConcatenatedJsonTopicPublisher {
                     //###TODO USE STRINGWRITER TO HANDLE CR/LF
                     //###TODO USE STRINGWRITER TO HANDLE CR/LF
                     Multimap<StringBuilder, VoidFuture> partitions = LinkedListMultimap.create();
-                    for (Entry<JsonElement, VoidFuture> entry : messages.entries()) {
+                    for (Entry<JsonElement, VoidFuture> entry : copyOfMessage.entries()) {
                         String jsonValue = entry.getKey().toString();
                         if (sb.length() + jsonValue.length() > transport.mtu())
                             sb = new StringBuilder();
@@ -92,7 +91,7 @@ public class ConcatenatedJsonTopicPublisher {
                         partitions.put(sb, entry.getValue());
                     }
 
-                    // STEP 2 publish partitions
+                    // STEP 2 send partitions
                     for (Entry<StringBuilder, Collection<VoidFuture>> entry : partitions.asMap().entrySet()) {
                         run(() -> {
                             return transport.send(entry.getKey().toString());
@@ -118,7 +117,7 @@ public class ConcatenatedJsonTopicPublisher {
                         });
                     }
 
-                    return Futures.successfulAsList(messages.values());
+                    return Futures.successfulAsList(copyOfMessage.values());
                 });
             }
         };
@@ -135,13 +134,13 @@ public class ConcatenatedJsonTopicPublisher {
 
     public static void main(String... args) throws Exception {
 
-        ConcatenatedJsonTopicPublisher.Transport aws = new ConcatenatedJsonTopicPublisher.Transport() {
+        ConcatenatedJsonWriter.Transport aws = new ConcatenatedJsonWriter.Transport() {
             SnsAsyncClient snsClient = SnsAsyncClient.create();
             String topicArn = "arn:aws:sns:us-east-1:343892718819:MyServiceDev-Myservice-TopicBFC7AF6E-QFKBW7OHVXNZ";
     
             @Override
             public int mtu() {
-                return 256 * 1024;
+                return 256 * 1024; // sns/sqs max msg len
             }
     
             @Override
@@ -151,9 +150,7 @@ public class ConcatenatedJsonTopicPublisher {
                         PublishRequest publishRequest = PublishRequest.builder()
                                 //
                                 .topicArn(topicArn).message(message).build();
-    
-                        ListenableFuture<PublishResponse> lf = CompletableFuturesExtra
-                                .toListenableFuture(snsClient.publish(publishRequest));
+                        ListenableFuture<PublishResponse> lf = CompletableFuturesExtra.toListenableFuture(snsClient.publish(publishRequest));
                         lf.addListener(() -> {
                             try {
                                 lf.get();
@@ -167,13 +164,13 @@ public class ConcatenatedJsonTopicPublisher {
             }
         };
     
-        final ConcatenatedJsonTopicPublisher topicPublisher = new ConcatenatedJsonTopicPublisher(aws);
+        final ConcatenatedJsonWriter writer = new ConcatenatedJsonWriter(aws);
         try {
             for (int i = 0; i < 25000; ++i) {
-                topicPublisher.request(new JsonPrimitive(random()));
+                writer.request(new JsonPrimitive(random()));
             }
         } finally {
-            topicPublisher.publish().get();
+            writer.send().get();
         }
         System.out.println("done");
     }
