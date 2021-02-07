@@ -27,11 +27,17 @@ import software.amazon.awssdk.services.sns.SnsAsyncClient;
 public class ConcatenatedJsonWriter {
 
     public interface Transport {
-        // maximum transport unit
+        /**
+         * maximum transport unit
+         */
         int mtu();
-        // e.g., io.micrometer tags
+        /**
+         * e.g., io.micrometer tags
+         */
         String[] tags();
-        // send message
+        /**
+         * send message
+         */
         ListenableFuture<Void> send(String message);
     }
 
@@ -63,9 +69,9 @@ public class ConcatenatedJsonWriter {
         log("ctor");
         this.transport = transport;
 
-        requestMeter = Metrics.counter("ConcatenatedJsonTopicPublisher.request", transport.tags());
-        successMeter = Metrics.counter("ConcatenatedJsonTopicPublisher.success", transport.tags());
-        failureMeter = Metrics.counter("ConcatenatedJsonTopicPublisher.failure", transport.tags());
+        requestMeter = Metrics.counter("ConcatenatedJsonWriter.request", transport.tags());
+        successMeter = Metrics.counter("ConcatenatedJsonWriter.success", transport.tags());
+        failureMeter = Metrics.counter("ConcatenatedJsonWriter.failure", transport.tags());
     }
 
     public ListenableFuture<Void> request(JsonElement message) {
@@ -110,7 +116,7 @@ public class ConcatenatedJsonWriter {
                                 });
                             }
                         }, e -> {
-                            log(e.getMessage());
+                            // log(e.getMessage());
                             for (VoidFuture voidFuture : entry.getValue()) {
                                 failureMeter.increment();
                                 defer.add(() -> {

@@ -4,9 +4,11 @@ import java.util.ArrayList;
 import java.util.List;
 
 import com.google.common.base.Defaults;
+import com.google.common.base.Strings;
 import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
 import com.google.gson.JsonObject;
+import com.google.gson.JsonPrimitive;
 
 import org.junit.jupiter.api.Test;
 
@@ -68,13 +70,16 @@ public class ConcatenatedJsonWriterTest {
 
     @Test
     public void testmtu() throws Exception {
-        ListenableFuture<Void> lf1, lf2;
-        
-        lf1 = writer.request(new JsonObject());
-        lf2 = writer.request(new JsonObject());
+        // -3 compensates for double quotes pair and a \n
+        // i.e., sending foo sends "foo"\n
+        ListenableFuture<Void> lf1 = writer.request(new JsonPrimitive(Strings.repeat("a", transport.mtu() - 3)));
         writer.send().get();
-        // lf1.get();
-        // lf2.get();
-        assertEquals("{}\n{}\n", sentMessages.get(0));
+        lf1.get();
+        // can't send a single element larger than mtu
+        assertThrows(Exception.class, () -> {
+            ListenableFuture<Void> lf2 = writer.request(new JsonPrimitive(Strings.repeat("a", transport.mtu())));
+            writer.send().get();
+            lf2.get();
+        });
     }
 }
