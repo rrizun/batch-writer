@@ -28,7 +28,7 @@ public class ConcatenatedJsonWriter {
 
     public interface Transport {
         /**
-         * maximum transport unit
+         * maximum transmission unit
          */
         int mtu();
         /**
