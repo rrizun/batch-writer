@@ -11,9 +11,9 @@ import software.amazon.awssdk.services.sns.model.PublishRequest;
 import software.amazon.awssdk.services.sns.model.PublishResponse;
 
 /**
- * ConcatenatedJsonWriterTransportAws
+ * ConcatenatedJsonWriterTransportAwsTopic
  */
-public class ConcatenatedJsonWriterTransportAws implements ConcatenatedJsonWriter.Transport {
+public class ConcatenatedJsonWriterTransportAwsTopic implements ConcatenatedJsonWriter.Transport {
     private final SnsAsyncClient snsClient;
     private final String topicArn;
 
@@ -23,7 +23,7 @@ public class ConcatenatedJsonWriterTransportAws implements ConcatenatedJsonWrite
      * @param snsClient
      * @param topicArn
      */
-    public ConcatenatedJsonWriterTransportAws(SnsAsyncClient snsClient, String topicArn) {
+    public ConcatenatedJsonWriterTransportAwsTopic(SnsAsyncClient snsClient, String topicArn) {
         this.snsClient = snsClient;
         this.topicArn = topicArn;
     }

@@ -5,16 +5,25 @@ import java.util.List;
 
 import com.google.common.base.Defaults;
 import com.google.common.base.Strings;
+import com.google.common.collect.Iterators;
+import com.google.common.collect.Lists;
 import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
+import com.google.gson.Gson;
+import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonPrimitive;
+import com.google.gson.JsonStreamParser;
 
 import org.junit.jupiter.api.Test;
 
 import helpers.ConcatenatedJsonWriter;
+import io.micrometer.core.instrument.Metrics;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 
 public class ConcatenatedJsonWriterTest {
+
+    private final List<String> sendMessages = new ArrayList<>();
 
     private final ConcatenatedJsonWriter.Transport transport = new ConcatenatedJsonWriter.Transport() {
 
@@ -30,56 +39,63 @@ public class ConcatenatedJsonWriterTest {
 
         @Override
         public ListenableFuture<Void> send(String message) {
-            if (message.length()>mtu())
-                return Futures.immediateFailedFuture(new Exception("mtu"));
-            sentMessages.add(message);
-            return Futures.immediateFuture(Defaults.defaultValue(Void.class));
+            if (message.length() > mtu())
+                return Futures.immediateFailedFuture(new Exception(String.format("message.len=%s mtu=%s", message.length(), mtu())));
+            sendMessages.add(message);
+            return Futures.immediateVoidFuture();
         }
     };
     
     private final ConcatenatedJsonWriter writer = new ConcatenatedJsonWriter(transport);
 
-    private final List<String> sentMessages = new ArrayList<>();
-
     @Test
     public void test() throws Exception {
         ListenableFuture<Void> lf;
         
-        lf = writer.request(new JsonObject());
-        writer.send().get();
+        lf = writer.write(new JsonObject());
+        writer.flush().get();
         // lf.get();
-        assertEquals("{}\n", sentMessages.get(0));
+        assertEquals("{}\n", sendMessages.get(0));
 
-        lf = writer.request(new JsonObject());
-        writer.send().get();
+        lf = writer.write(new JsonObject());
+        writer.flush().get();
         // lf.get();
-        assertEquals("{}\n", sentMessages.get(1));
+        assertEquals("{}\n", sendMessages.get(1));
     }
 
     @Test
     public void testb() throws Exception {
-        ListenableFuture<Void> lf1, lf2;
-        
-        lf1 = writer.request(new JsonObject());
-        lf2 = writer.request(new JsonObject());
-        writer.send().get();
-        // lf1.get();
-        // lf2.get();
-        assertEquals("{}\n{}\n", sentMessages.get(0));
+        Futures.allAsList(writer.write(json("{}")), writer.write(json("{}")), writer.flush()).get();
+        assertEquals(stream("{}{}"), stream(sendMessages.get(0)));
     }
 
     @Test
-    public void testmtu() throws Exception {
-        // -3 compensates for double quotes pair and a \n
-        // i.e., sending foo sends "foo"\n
-        ListenableFuture<Void> lf1 = writer.request(new JsonPrimitive(Strings.repeat("a", transport.mtu() - 3)));
-        writer.send().get();
-        lf1.get();
-        // can't send a single element larger than mtu
-        assertThrows(Exception.class, () -> {
-            ListenableFuture<Void> lf2 = writer.request(new JsonPrimitive(Strings.repeat("a", transport.mtu())));
-            writer.send().get();
-            lf2.get();
+    public void testCanSendLessThanMtu() throws Exception {
+        String value = Strings.repeat("a", transport.mtu() / 2);
+        Futures.allAsList(writer.write(new JsonPrimitive(value)), writer.flush()).get();
+        assertEquals(stream(value), stream(sendMessages.get(0)));
+    }
+
+    @Test
+    public void testCantSendMoreThanMtu() throws Exception {
+        String value = Strings.repeat("a", transport.mtu() + 1);
+        Exception e = assertThrows(Exception.class, () -> {
+            Futures.allAsList(writer.write(new JsonPrimitive(value)), writer.flush()).get();
         });
+        System.out.println("assertThrows="+e.toString());
+    }
+
+    // convenience
+    private JsonElement json(String json) {
+        return new Gson().fromJson(json, JsonElement.class);
+    }
+
+    // convenience
+    private List<JsonElement> stream(String concatenatedJson) {
+        return Lists.newArrayList(new JsonStreamParser(concatenatedJson));
+    }
+
+    static {
+        Metrics.addRegistry(new SimpleMeterRegistry());
     }
 }
