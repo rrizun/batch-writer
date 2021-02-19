@@ -21,7 +21,7 @@ public class DynamoReaderTest {
     final long t0 = System.currentTimeMillis();
 
     AtomicLong requests = new AtomicLong();
-    final DynamoReader dynamoReader = new DynamoReader("DlcmStack-TableCD117FA1-10BX86V213J7Z", DynamoDbAsyncClient.create());
+    final DynamoReader dynamoReader = new DynamoReader(DynamoDbAsyncClient.create(), "DlcmStack-TableCD117FA1-10BX86V213J7Z");
 
     try {
 
