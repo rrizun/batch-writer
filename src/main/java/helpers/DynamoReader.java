@@ -78,19 +78,19 @@ public class DynamoReader {
   private Multimap<Map<String, AttributeValue>, GetItemFuture> batchGetItem() {
 
     // dynamo item -> future
-    Multimap<Map<String, AttributeValue>, GetItemFuture> copyOf = ImmutableMultimap.copyOf(workingSet);
+    Multimap<Map<String, AttributeValue>, GetItemFuture> copyOfKeys = ImmutableMultimap.copyOf(workingSet);
 
     // if (!inFlight.isEmpty())
     {
       try {
         // infer key schema
         Set<String> keySchema = new HashSet<>();
-        for (Map<String, AttributeValue> key : copyOf.keySet())
+        for (Map<String, AttributeValue> key : copyOfKeys.keySet())
           keySchema.addAll(key.keySet());
   
         KeysAndAttributes keysAndAttributes = KeysAndAttributes.builder()
             //
-            .keys(copyOf.keySet())
+            .keys(copyOfKeys.keySet())
             //
             .build();
   
@@ -138,7 +138,7 @@ public class DynamoReader {
   
               // success 404
               // "If a requested item does not exist, it is not returned in the result."
-              copyOf.keySet().forEach(key->{
+              copyOfKeys.keySet().forEach(key->{
                 allFutures.removeAll(key).forEach(f->{
                   successMeter.mark(1);
                   f.set(null); // 404
@@ -146,7 +146,7 @@ public class DynamoReader {
               });
             } catch (Exception e) {
               log(e);
-              copyOf.keySet().forEach(key->{
+              copyOfKeys.keySet().forEach(key->{
                 allFutures.removeAll(key).forEach(f->{
                   failureMeter.mark(1);
                   f.setException(e); // 500
