@@ -10,8 +10,8 @@ import org.slf4j.*;
 public class LogHelper {
   private final Logger logger;
 
-  public LogHelper(Object object) {
-    logger = LoggerFactory.getLogger(object.getClass());
+  public LogHelper(Object classOrInstance) {
+    logger = LoggerFactory.getLogger(classOrInstance instanceof Class<?> ? (Class<?>) classOrInstance : classOrInstance.getClass());
   }
 
   public void log(Object... args) {
