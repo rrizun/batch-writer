@@ -51,24 +51,24 @@ public class ConcatenatedJsonWriterTest {
     @Test
     public void test() throws Exception {
         Futures.allAsList(writer.write(new JsonObject()), writer.flush()).get();
-        assertEquals(jsonElements("{}"), jsonElements(sendMessages.get(0)));
+        assertEquals(stream("{}"), stream(sendMessages.get(0)));
 
         Futures.allAsList(writer.write(new JsonObject()), writer.flush()).get();
-        assertEquals(jsonElements("{}"), jsonElements(sendMessages.get(1)));
+        assertEquals(stream("{}"), stream(sendMessages.get(1)));
 
     }
 
     @Test
     public void testb() throws Exception {
         Futures.allAsList(writer.write(json("{}")), writer.write(json("{}")), writer.flush()).get();
-        assertEquals(jsonElements("{}{}"), jsonElements(sendMessages.get(0)));
+        assertEquals(stream("{}{}"), stream(sendMessages.get(0)));
     }
 
     @Test
     public void testCanSendLessThanMtu() throws Exception {
         String value = Strings.repeat("a", transport.mtu() / 2);
         Futures.allAsList(writer.write(new JsonPrimitive(value)), writer.flush()).get();
-        assertEquals(jsonElements(value), jsonElements(sendMessages.get(0)));
+        assertEquals(stream(value), stream(sendMessages.get(0)));
     }
 
     @Test
@@ -86,7 +86,7 @@ public class ConcatenatedJsonWriterTest {
     }
 
     // convenience
-    private List<JsonElement> jsonElements(String concatenatedJson) {
+    private List<JsonElement> stream(String concatenatedJson) {
         return Lists.newArrayList(new JsonStreamParser(concatenatedJson));
     }
 

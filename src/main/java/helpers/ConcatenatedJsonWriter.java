@@ -45,8 +45,8 @@ public class ConcatenatedJsonWriter {
     }
 
     private class VoidFuture extends AbstractFuture<Void> {
-        public boolean set(Void value) {
-            return super.set(value);
+        public boolean setVoid() {
+            return super.set(Defaults.defaultValue(Void.class));
         }
         public boolean setException(Throwable throwable) {
             return super.setException(throwable);
@@ -56,8 +56,8 @@ public class ConcatenatedJsonWriter {
     private final Transport transport;
 
     private final Counter requestMeter;
-    // private final Counter successMeter;
-    // private final Counter failureMeter;
+    private final Counter successMeter;
+    private final Counter failureMeter;
 
     // preserve insertion order
     private final Multimap<JsonElement, VoidFuture> messages = LinkedListMultimap.create();
@@ -74,31 +74,22 @@ public class ConcatenatedJsonWriter {
         this.transport = transport;
 
         requestMeter = Metrics.counter("ConcatenatedJsonWriter.request", transport.tags());
-        // successMeter = Metrics.counter("ConcatenatedJsonWriter.success", transport.tags());
-        // failureMeter = Metrics.counter("ConcatenatedJsonWriter.failure", transport.tags());
+        successMeter = Metrics.counter("ConcatenatedJsonWriter.success", transport.tags());
+        failureMeter = Metrics.counter("ConcatenatedJsonWriter.failure", transport.tags());
     }
 
     public ListenableFuture<Void> write(JsonElement message) {
         // log("write", message);
         requestMeter.increment();
-        VoidFuture f = new VoidFuture();
-        messages.put(message, f);
-        return f;
+        VoidFuture lf = new VoidFuture();
+        messages.put(message, lf);
+        return lf;
     }
 
     public ListenableFuture<Void> flush() {
-        log("flush");
         Multimap<JsonElement, VoidFuture> copyOfMessages = ImmutableMultimap.copyOf(messages);
         messages.clear();
-        return flush(copyOfMessages, transport);
-    }
-
-    private static ListenableFuture<Void> flush(Multimap<JsonElement, VoidFuture> copyOfMessages, Transport transport) {
-        Counter requestMeter = Metrics.counter("ConcatenatedJsonWriter.request", transport.tags());
-        Counter successMeter = Metrics.counter("ConcatenatedJsonWriter.success", transport.tags());
-        Counter failureMeter = Metrics.counter("ConcatenatedJsonWriter.failure", transport.tags());
-        return new FutureRunner() {
-            List<Runnable> defer = new ArrayList<>();
+        return new FutureRunner2() {
             {
                 run(() -> {
                     Multimap<ByteArrayOutputStream, VoidFuture> partitions = LinkedListMultimap.create();
@@ -114,30 +105,26 @@ public class ConcatenatedJsonWriter {
                     }
 
                     // STEP 2 send partitions
-                    for (Entry<ByteArrayOutputStream, Collection<VoidFuture>> entry : partitions.asMap().entrySet()) {
+                    partitions.asMap().entrySet().forEach(entry -> {
                         run(() -> {
-                            System.out.println(entry.getKey().toString());
+                            // request
                             return transport.send(entry.getKey().toString());
                         }, sendResponse -> {
-                            for (VoidFuture voidFuture : entry.getValue()) {
-                                successMeter.increment();
-                                defer.add(() -> {
-                                    voidFuture.set(Defaults.defaultValue(Void.class));
-                                });
-                            }
+                            // success
+                            entry.getValue().forEach(lf -> {
+                                if (lf.setVoid())
+                                    successMeter.increment();
+                            });
                         }, e -> {
-                            for (VoidFuture voidFuture : entry.getValue()) {
-                                failureMeter.increment();
-                                defer.add(() -> {
-                                    voidFuture.setException(e);
-                                });
-                            }
+                            // failure
+                            entry.getValue().forEach(lf -> {
+                                if (lf.setException(e))
+                                    failureMeter.increment();
+                            });
                         }, () -> {
-                            System.out.println("stats="+stats());
-                            for (Runnable runnable : defer)
-                                runnable.run();
+                            log("request", requestMeter.count(), "success", successMeter.count(), "failure", failureMeter.count());
                         });
-                    }
+                    });
 
                     return Futures.successfulAsList(copyOfMessages.values());
                 });
@@ -147,19 +134,7 @@ public class ConcatenatedJsonWriter {
                 new PrintStream(baos, true).println(jsonElement.toString());
                 return baos.toByteArray();
             }
-            String stats() {
-                return new LogHelper(this).str("request", requestMeter.count(), "success", successMeter.count(), "failure", failureMeter.count());
-            }
-            @Override
-            protected void afterDone() {
-                // System.out.println("stats="+stats());
-            }
         };
-
-        //###YODO adddListener and dump stats here?
-        //###YODO adddListener and dump stats here?
-        //###YODO adddListener and dump stats here?
-
     }
 
     private void log(Object... args) {
@@ -172,9 +147,11 @@ public class ConcatenatedJsonWriter {
         final ConcatenatedJsonWriter writer = new ConcatenatedJsonWriter(new ConcatenatedJsonWriterTransportAwsTopic(SnsAsyncClient.create(), topicArn));
         try {
             for (int i = 0; i < 16*250; ++i) {
-                JsonObject jsonElement = new JsonObject();
-                jsonElement.addProperty("value", random());
-                ListenableFuture<Void> lf = writer.write(jsonElement);
+                JsonObject jsonObject = new JsonObject();
+                byte[] bytes = new byte[new Random().nextInt(256)];
+                new SecureRandom().nextBytes(bytes);
+                jsonObject.addProperty("value", BaseEncoding.base64Url().encode(bytes));
+                ListenableFuture<Void> lf = writer.write(jsonObject);
                 lf.addListener(()->{
                     try {
                         lf.get();
@@ -187,13 +164,6 @@ public class ConcatenatedJsonWriter {
             writer.flush().get();
         }
         System.out.println("done");
-    }
-
-    // e.g., X2OJkPuG1z5EjZlSWum54wJK
-    private static String random() {
-        byte[] bytes = new byte[new Random().nextInt(256)];
-        new SecureRandom().nextBytes(bytes);
-        return BaseEncoding.base64Url().encode(bytes);
     }
 
 }
