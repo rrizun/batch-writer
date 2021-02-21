@@ -21,6 +21,7 @@ import software.amazon.awssdk.services.sns.SnsAsyncClient;
 import software.amazon.awssdk.services.sns.model.PublishRequest;
 import software.amazon.awssdk.services.sns.model.PublishResponse;
 
+@Deprecated // see ConcatenatedJsonWriter
 public class TopicWriter {
 
     private final Object lock = new Object();
@@ -63,7 +64,7 @@ public class TopicWriter {
                     jsonWriter.beginArray();
 
                     Futures.successfulAsList(allFutures.values()).addListener(()->{
-                        log("flush", stats());
+                        // log("flush", stats());
                         setVoid();
                     }, MoreExecutors.directExecutor());
                 }
@@ -179,7 +180,7 @@ public class TopicWriter {
             void doFinally() {
                 if (busy==0) {
                     --busy; // once
-                    log("doFinally", stats());
+                    // log("doFinally", stats());
                     for (Runnable runnable: defer)
                         runnable.run();
                     allFutures.values().removeAll(batch.values());
@@ -189,9 +190,9 @@ public class TopicWriter {
         };
     }
 
-    private String stats() {
-        return new LogHelper(this).str("request", requestMeter, "success", successMeter, "failure", failureMeter);
-    }
+    // private String stats() {
+    //     // return new LogHelper(this).str("request", requestMeter, "success", successMeter, "failure", failureMeter);
+    // }
 
     private <T> ListenableFuture<T> lf(CompletableFuture<T> cf) {
         return CompletableFuturesExtra.toListenableFuture(cf);

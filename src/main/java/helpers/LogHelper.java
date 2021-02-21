@@ -11,30 +11,22 @@ public class LogHelper {
   private final Logger logger;
 
   public LogHelper(Object classOrInstance) {
-    logger = LoggerFactory.getLogger(classOrInstance instanceof Class<?> ? (Class<?>) classOrInstance : classOrInstance.getClass());
+    Class<?> classOfT = classOrInstance.getClass();
+    if (classOrInstance instanceof Class)
+      classOfT = (Class<?>) classOrInstance;
+    logger = LoggerFactory.getLogger(classOfT);
   }
 
   public void log(Object... args) {
-    logger.info(str(args));
-  }
-
-  public void debug(Object... args) {
-    logger.debug(str(args));
-  }
-
-  public void trace(Object... args) {
-    logger.trace(str(args));
-  }
-
-  public String str(Object... args) {
     List<String> parts = new ArrayList<>();
     for (Object arg : args)
       parts.add("" + arg);
-    return String.join(" ", parts);
+    logger.info(String.join(" ", parts));
   }
 
   // static {
-  //   ((ch.qos.logback.classic.Logger) org.slf4j.LoggerFactory.getLogger("ROOT")).setLevel(ch.qos.logback.classic.Level.INFO);
+  // ((ch.qos.logback.classic.Logger)
+  // org.slf4j.LoggerFactory.getLogger("ROOT")).setLevel(ch.qos.logback.classic.Level.INFO);
   // }
 
 }
