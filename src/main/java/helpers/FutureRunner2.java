@@ -21,20 +21,6 @@ public class FutureRunner2 extends AbstractFuture<Void> {
     private final Object lock = new Object();
     private final Collection<ListenableFuture<?>> futures = new CopyOnWriteArrayList<>();
 
-    // ----------------------------------------------------------------------
-
-    /**
-     * ctor
-     */
-    public FutureRunner2() {
-        addListener(() -> {
-            if (isCancelled()) {
-                for (ListenableFuture<?> lf : futures)
-                    lf.cancel(true);
-            }
-        }, MoreExecutors.directExecutor());
-    }
-
     /**
      * run
      * 
@@ -124,7 +110,12 @@ public class FutureRunner2 extends AbstractFuture<Void> {
         }
     }
 
-    // ----------------------------------------------------------------------
+    @Override
+    protected void afterDone() {
+        super.afterDone();
+        if (isCancelled())
+            futures.forEach(lf -> lf.cancel(true));
+    }
 
     // convenience
     protected <T> ListenableFuture<T> lf(CompletableFuture<T> cf) {
