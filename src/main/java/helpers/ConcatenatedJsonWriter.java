@@ -3,9 +3,6 @@ package helpers;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.security.SecureRandom;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.List;
 import java.util.Random;
 import java.util.Map.Entry;
 
@@ -22,7 +19,6 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 
 import io.micrometer.core.instrument.Counter;
-import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Metrics;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import software.amazon.awssdk.services.sns.SnsAsyncClient;
@@ -55,9 +51,9 @@ public class ConcatenatedJsonWriter {
 
     private final Transport transport;
 
-    private final Counter requestMeter;
-    private final Counter successMeter;
-    private final Counter failureMeter;
+    private final Counter requestCounter;
+    private final Counter successCounter;
+    private final Counter failureCounter;
 
     // preserve insertion order
     private final Multimap<JsonElement, VoidFuture> messages = LinkedListMultimap.create();
@@ -73,14 +69,14 @@ public class ConcatenatedJsonWriter {
         
         this.transport = transport;
 
-        requestMeter = Metrics.counter("ConcatenatedJsonWriter.request", transport.tags());
-        successMeter = Metrics.counter("ConcatenatedJsonWriter.success", transport.tags());
-        failureMeter = Metrics.counter("ConcatenatedJsonWriter.failure", transport.tags());
+        requestCounter = Metrics.counter("ConcatenatedJsonWriter.request", transport.tags());
+        successCounter = Metrics.counter("ConcatenatedJsonWriter.success", transport.tags());
+        failureCounter = Metrics.counter("ConcatenatedJsonWriter.failure", transport.tags());
     }
 
     public ListenableFuture<Void> write(JsonElement message) {
         // log("write", message);
-        requestMeter.increment();
+        requestCounter.increment();
         VoidFuture lf = new VoidFuture();
         messages.put(message, lf);
         return lf;
@@ -113,16 +109,17 @@ public class ConcatenatedJsonWriter {
                             // success
                             entry.getValue().forEach(lf -> {
                                 if (lf.setVoid())
-                                    successMeter.increment();
+                                    successCounter.increment();
                             });
                         }, e -> {
                             // failure
                             entry.getValue().forEach(lf -> {
                                 if (lf.setException(e))
-                                    failureMeter.increment();
+                                    failureCounter.increment();
                             });
                         }, () -> {
-                            log("request", requestMeter.count(), "success", successMeter.count(), "failure", failureMeter.count());
+                            // finally
+                            log("request", requestCounter.count(), "success", successCounter.count(), "failure", failureCounter.count());
                         });
                     });
 
@@ -137,8 +134,8 @@ public class ConcatenatedJsonWriter {
         };
     }
 
-    private void log(Object... args) {
-        new LogHelper(this).log(args);
+    static void log(Object... args) {
+        new LogHelper(ConcatenatedJsonWriter.class).log(args);
     }
 
     public static void main(String... args) throws Exception {
@@ -156,14 +153,13 @@ public class ConcatenatedJsonWriter {
                     try {
                         lf.get();
                     } catch (Exception e) {
-                        System.out.println(""+e);
+                        // log(e);
                     }
                 }, MoreExecutors.directExecutor());
             }
         } finally {
-            writer.flush().get();
+            log(writer.flush().get());
         }
-        System.out.println("done");
     }
 
 }
