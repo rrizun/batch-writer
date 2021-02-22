@@ -52,7 +52,7 @@ public class ConcatenatedJsonWriter {
     private final Counter failureCounter;
 
     // preserve insertion order
-    private final Multimap<JsonElement, VoidFuture> messages = LinkedListMultimap.create();
+    private final Multimap<JsonElement, VoidFuture> jsonElements = LinkedListMultimap.create();
 
     /**
      * ctor
@@ -70,17 +70,17 @@ public class ConcatenatedJsonWriter {
         failureCounter = Metrics.counter("ConcatenatedJsonWriter.failure", tags);
     }
 
-    public ListenableFuture<Void> write(JsonElement message) {
+    public ListenableFuture<Void> write(JsonElement jsonElement) {
         // log("write", message);
         requestCounter.increment();
         VoidFuture lf = new VoidFuture();
-        messages.put(message, lf);
+        jsonElements.put(jsonElement, lf);
         return lf;
     }
 
     public ListenableFuture<Void> flush() {
-        Multimap<JsonElement, VoidFuture> copyOfMessages = ImmutableMultimap.copyOf(messages);
-        messages.clear();
+        Multimap<JsonElement, VoidFuture> copyOfJsonElements = ImmutableMultimap.copyOf(jsonElements);
+        jsonElements.clear();
         return new FutureRunner2() {
             {
                 run(() -> {
@@ -88,7 +88,7 @@ public class ConcatenatedJsonWriter {
 
                     // STEP 1 partition
                     ByteArrayOutputStream baos = new ByteArrayOutputStream();
-                    for (Entry<JsonElement, VoidFuture> entry : copyOfMessages.entries()) {
+                    for (Entry<JsonElement, VoidFuture> entry : copyOfJsonElements.entries()) {
                         byte[] bytes = render(entry.getKey());
                         if (baos.size() + bytes.length > transport.mtu())
                             baos = new ByteArrayOutputStream();
@@ -119,7 +119,7 @@ public class ConcatenatedJsonWriter {
                         });
                     });
 
-                    return Futures.successfulAsList(copyOfMessages.values());
+                    return Futures.successfulAsList(copyOfJsonElements.values());
                 });
             }
             byte[] render(JsonElement jsonElement) {
