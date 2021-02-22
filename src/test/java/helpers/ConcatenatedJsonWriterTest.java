@@ -36,6 +36,7 @@ public class ConcatenatedJsonWriterTest {
 
         @Override
         public ListenableFuture<Void> send(String message) {
+            // log("send", message);
             if (message.length() > mtu())
                 throw new RuntimeException(String.format("message.len=%s mtu=%s", message.length(), mtu()));
             sendMessages.add(message);
@@ -47,10 +48,10 @@ public class ConcatenatedJsonWriterTest {
 
     @Test
     public void test() throws Exception {
-        Futures.allAsList(writer.write(new JsonObject()), writer.flush()).get();
+        Futures.allAsList(writer.write(json("{}")), writer.flush()).get();
         assertEquals(stream("{}"), stream(sendMessages));
 
-        Futures.allAsList(writer.write(new JsonObject()), writer.flush()).get();
+        Futures.allAsList(writer.write(json("{}")), writer.flush()).get();
         assertEquals(stream("{}{}"), stream(sendMessages));
 
     }
@@ -71,9 +72,10 @@ public class ConcatenatedJsonWriterTest {
     @Test
     public void testCantSendMoreThanMtu() throws Exception {
         String value = Strings.repeat("a", transport.mtu() + 1);
-        assertThrows(Exception.class, () -> {
+        IllegalArgumentException e = assertThrows(IllegalArgumentException.class, () -> {
             Futures.allAsList(writer.write(new JsonPrimitive(value)), writer.flush()).get();
         });
+        log("assertThrows.expected", e);
         assertEquals(stream(), stream(sendMessages));
     }
 
@@ -116,6 +118,10 @@ public class ConcatenatedJsonWriterTest {
         for (String concatenatedJson : concatenatedJsonList)
             stream.addAll(Lists.newArrayList(new JsonStreamParser(concatenatedJson)));
         return stream;
+    }
+
+    private void log(Object... args) {
+        new LogHelper(this).log(args);
     }
 
     static {

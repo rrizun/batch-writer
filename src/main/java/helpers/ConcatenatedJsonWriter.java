@@ -4,12 +4,11 @@ import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.security.SecureRandom;
 import java.util.Random;
-import java.util.Map.Entry;
 
 import com.google.common.base.Defaults;
-import com.google.common.collect.ImmutableMultimap;
 import com.google.common.collect.LinkedListMultimap;
 import com.google.common.collect.Multimap;
+import com.google.common.collect.Multimaps;
 import com.google.common.io.BaseEncoding;
 import com.google.common.util.concurrent.AbstractFuture;
 import com.google.common.util.concurrent.Futures;
@@ -23,6 +22,11 @@ import io.micrometer.core.instrument.Metrics;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import software.amazon.awssdk.services.sns.SnsAsyncClient;
 
+/**
+ * ConcatenatedJsonWriter
+ * 
+ * <p>thread-unsafe
+ */
 public class ConcatenatedJsonWriter {
 
     public interface Transport {
@@ -32,6 +36,8 @@ public class ConcatenatedJsonWriter {
         int mtu();
         /**
          * send message
+         * 
+         * <p>ConcatenatedJsonWriter shall not ask Transport to send a message greater than mtu
          */
         ListenableFuture<Void> send(String message);
     }
@@ -51,8 +57,8 @@ public class ConcatenatedJsonWriter {
     private final Counter successCounter;
     private final Counter failureCounter;
 
-    // preserve insertion order
-    private final Multimap<JsonElement, VoidFuture> jsonElements = LinkedListMultimap.create();
+    private ByteArrayOutputStream baos = new ByteArrayOutputStream();
+    private final Multimap<ByteArrayOutputStream, VoidFuture> partitions = Multimaps.synchronizedMultimap(LinkedListMultimap.create());
 
     /**
      * ctor
@@ -70,67 +76,81 @@ public class ConcatenatedJsonWriter {
         failureCounter = Metrics.counter("ConcatenatedJsonWriter.failure", tags);
     }
 
+    /**
+     * write
+     * 
+     * @param jsonElement
+     * @return
+     */
     public ListenableFuture<Void> write(JsonElement jsonElement) {
-        // log("write", message);
+        // log("write", jsonElement);
         requestCounter.increment();
+
+        byte[] bytes = bytes(jsonElement);
+        if (bytes.length > transport.mtu())
+            throw new IllegalArgumentException(jsonElement.toString());
+        if (baos.size() + bytes.length > transport.mtu())
+            baos = flush(baos, partitions.get(baos));
+        baos.write(bytes, 0, bytes.length);
+
         VoidFuture lf = new VoidFuture();
-        jsonElements.put(jsonElement, lf);
+        partitions.put(baos, lf); // track futures on a per-baos/partition basis
         return lf;
     }
 
+    /**
+     * flush
+     * 
+     * @return
+     */
     public ListenableFuture<Void> flush() {
-        Multimap<JsonElement, VoidFuture> copyOfJsonElements = ImmutableMultimap.copyOf(jsonElements);
-        jsonElements.clear();
+        log("flush");
+        if (baos.size() > 0)
+            baos = flush(baos, partitions.get(baos));
         return new FutureRunner2() {
             {
                 run(() -> {
-                    Multimap<ByteArrayOutputStream, VoidFuture> partitions = LinkedListMultimap.create();
-
-                    // STEP 1 partition
-                    ByteArrayOutputStream baos = new ByteArrayOutputStream();
-                    for (Entry<JsonElement, VoidFuture> entry : copyOfJsonElements.entries()) {
-                        byte[] bytes = render(entry.getKey());
-                        if (baos.size() + bytes.length > transport.mtu())
-                            baos = new ByteArrayOutputStream();
-                        baos.write(bytes, 0, bytes.length);
-                        partitions.put(baos, entry.getValue());
-                    }
-
-                    // STEP 2 send partitions
-                    partitions.asMap().entrySet().forEach(entry -> {
-                        run(() -> {
-                            // request
-                            return transport.send(entry.getKey().toString());
-                        }, sendResponse -> {
-                            // success
-                            entry.getValue().forEach(lf -> {
-                                if (lf.setVoid())
-                                    successCounter.increment();
-                            });
-                        }, e -> {
-                            // failure
-                            entry.getValue().forEach(lf -> {
-                                if (lf.setException(e))
-                                    failureCounter.increment();
-                            });
-                        }, () -> {
-                            // finally
-                            log("request", requestCounter.count(), "success", successCounter.count(), "failure", failureCounter.count());
-                        });
-                    });
-
-                    return Futures.successfulAsList(copyOfJsonElements.values());
+                    return Futures.successfulAsList(partitions.values());
                 });
-            }
-            byte[] render(JsonElement jsonElement) {
-                ByteArrayOutputStream baos = new ByteArrayOutputStream();
-                new PrintStream(baos, true).println(jsonElement.toString());
-                return baos.toByteArray();
             }
         };
     }
 
-    static void log(Object... args) {
+    // returns new baos
+    private ByteArrayOutputStream flush(ByteArrayOutputStream baos, Iterable<VoidFuture> partition) {
+        new FutureRunner2() {
+            {
+                run(() -> {
+                    // request
+                    return transport.send(baos.toString());
+                }, sendResponse -> {
+                    // success
+                    partition.forEach(lf -> {
+                        if (lf.setVoid())
+                            successCounter.increment();
+                    });
+                }, e -> {
+                    // failure
+                    partition.forEach(lf -> {
+                        if (lf.setException(e))
+                            failureCounter.increment();
+                    });
+                }, () -> {
+                    // finally
+                    log("request", requestCounter.count(), "success", successCounter.count(), "failure", failureCounter.count());
+                });
+            }
+        };
+        return new ByteArrayOutputStream();
+    }
+
+    private byte[] bytes(JsonElement jsonElement) {
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        new PrintStream(baos, true).println(jsonElement.toString());
+        return baos.toByteArray();
+    }
+
+    private void log(Object... args) {
         new LogHelper(ConcatenatedJsonWriter.class).log(args);
     }
 
@@ -156,7 +176,7 @@ public class ConcatenatedJsonWriter {
                 }, MoreExecutors.directExecutor());
             }
         } finally {
-            log(writer.flush().get());
+            writer.flush().get();
         }
     }
 
