@@ -33,11 +33,6 @@ public class ConcatenatedJsonWriterTest {
         }
 
         @Override
-        public String[] tags() {
-            return new String[]{};
-        }
-
-        @Override
         public ListenableFuture<Void> send(String message) {
             if (message.length() > mtu())
                 return Futures.immediateFailedFuture(new Exception(String.format("message.len=%s mtu=%s", message.length(), mtu())));
@@ -46,7 +41,7 @@ public class ConcatenatedJsonWriterTest {
         }
     };
     
-    private final ConcatenatedJsonWriter writer = new ConcatenatedJsonWriter(transport);
+    private final ConcatenatedJsonWriter writer = new ConcatenatedJsonWriter(transport, new String[]{});
 
     @Test
     public void test() throws Exception {
