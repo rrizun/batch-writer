@@ -4,6 +4,8 @@ import static org.junit.jupiter.api.Assertions.*;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Random;
+import java.util.UUID;
 
 import com.google.common.base.Strings;
 import com.google.common.collect.ImmutableList;
@@ -73,6 +75,24 @@ public class ConcatenatedJsonWriterTest {
             Futures.allAsList(writer.write(new JsonPrimitive(value)), writer.flush()).get();
         });
         assertEquals(stream(), stream(sendMessages));
+    }
+
+    @Test
+    public void testRandom() throws Exception {
+        int count = 0;
+        final int batchCount = random(500);
+        for (int i = 0; i < batchCount; ++i) {
+            final int perBatch = random(500);
+            for (int j = 0; j < perBatch; ++j)
+                writer.write(json(UUID.randomUUID().toString()));
+            writer.flush().get();
+            count += perBatch;
+        }
+        assertEquals(count, stream(sendMessages).size());
+    }
+
+    private int random(int bound) {
+        return 1 + new Random().nextInt(bound);
     }
 
     // convenience
