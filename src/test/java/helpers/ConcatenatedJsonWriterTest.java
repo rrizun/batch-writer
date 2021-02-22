@@ -93,6 +93,18 @@ public class ConcatenatedJsonWriterTest {
         assertEquals(count, stream(sendMessages).size());
     }
 
+    @Test
+    public void testFlush() throws Exception {
+        writer.flush().get();
+        assertEquals(stream(), stream(sendMessages));
+
+        Futures.allAsList(writer.write(json("{}")), writer.flush(), writer.flush()).get();
+        assertEquals(stream("{}"), stream(sendMessages));
+
+        Futures.allAsList(writer.write(json("{}")), writer.flush(), writer.flush()).get();
+        assertEquals(stream("{}{}"), stream(sendMessages));
+    }
+
     private int random(int bound) {
         return 1 + new Random().nextInt(bound);
     }
