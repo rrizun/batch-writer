@@ -25,6 +25,7 @@ import software.amazon.awssdk.services.sns.SnsAsyncClient;
 /**
  * ConcatenatedJsonWriter
  * 
+ * <p>pipelined
  * <p>thread-unsafe
  */
 public class ConcatenatedJsonWriter {
@@ -81,6 +82,7 @@ public class ConcatenatedJsonWriter {
      * 
      * @param jsonElement
      * @return
+     * @throws IllegalArgumentException if transport mtu violated
      */
     public ListenableFuture<Void> write(JsonElement jsonElement) {
         // log("write", jsonElement);
