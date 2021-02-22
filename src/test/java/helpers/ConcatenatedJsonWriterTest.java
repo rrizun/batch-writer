@@ -8,14 +8,11 @@ import java.util.Random;
 import java.util.UUID;
 
 import com.google.common.base.Strings;
-import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Lists;
 import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
 import com.google.gson.Gson;
 import com.google.gson.JsonElement;
-import com.google.gson.JsonObject;
-import com.google.gson.JsonPrimitive;
 import com.google.gson.JsonStreamParser;
 
 import org.junit.jupiter.api.Test;
@@ -50,9 +47,11 @@ public class ConcatenatedJsonWriterTest {
     public void test() throws Exception {
         Futures.allAsList(writer.write(json("{}")), writer.flush()).get();
         assertEquals(stream("{}"), stream(sendMessages));
+        //###TODO verify counters
 
         Futures.allAsList(writer.write(json("{}")), writer.flush()).get();
         assertEquals(stream("{}{}"), stream(sendMessages));
+        //###TODO verify counters
 
     }
 
@@ -60,23 +59,26 @@ public class ConcatenatedJsonWriterTest {
     public void testb() throws Exception {
         Futures.allAsList(writer.write(json("{}")), writer.write(json("{}")), writer.flush()).get();
         assertEquals(stream("{}{}"), stream(sendMessages));
+        //###TODO verify counters
     }
 
     @Test
     public void testCanSendLessThanMtu() throws Exception {
         String value = Strings.repeat("a", transport.mtu() / 2);
-        Futures.allAsList(writer.write(new JsonPrimitive(value)), writer.flush()).get();
+        Futures.allAsList(writer.write(json(value)), writer.flush()).get();
         assertEquals(stream(value), stream(sendMessages));
+        //###TODO verify counters
     }
 
     @Test
     public void testCantSendMoreThanMtu() throws Exception {
         String value = Strings.repeat("a", transport.mtu() + 1);
         IllegalArgumentException e = assertThrows(IllegalArgumentException.class, () -> {
-            Futures.allAsList(writer.write(new JsonPrimitive(value)), writer.flush()).get();
+            Futures.allAsList(writer.write(json(value)), writer.flush()).get();
         });
         log("assertThrows.expected", e);
         assertEquals(stream(), stream(sendMessages));
+        //###TODO verify counters
     }
 
     @Test
@@ -91,18 +93,22 @@ public class ConcatenatedJsonWriterTest {
             count += perBatch;
         }
         assertEquals(count, stream(sendMessages).size());
+        //###TODO verify counters
     }
 
     @Test
     public void testFlush() throws Exception {
         writer.flush().get();
         assertEquals(stream(), stream(sendMessages));
+        //###TODO verify counters
 
         Futures.allAsList(writer.write(json("{}")), writer.flush(), writer.flush()).get();
         assertEquals(stream("{}"), stream(sendMessages));
+        //###TODO verify counters
 
         Futures.allAsList(writer.write(json("{}")), writer.flush(), writer.flush()).get();
         assertEquals(stream("{}{}"), stream(sendMessages));
+        //###TODO verify counters
     }
 
     private int random(int bound) {
@@ -115,13 +121,11 @@ public class ConcatenatedJsonWriterTest {
     }
 
     // convenience
-    private List<JsonElement> stream() {
-        return ImmutableList.of();
-    }
-
-    // convenience
-    private List<JsonElement> stream(String concatenatedJson) {
-        return Lists.newArrayList(new JsonStreamParser(concatenatedJson));
+    private List<JsonElement> stream(String... concatenatedJsonList) {
+        List<JsonElement> stream = new ArrayList<>();
+        for (String concatenatedJson : concatenatedJsonList)
+            stream.addAll(Lists.newArrayList(new JsonStreamParser(concatenatedJson)));
+        return stream;
     }
 
     // convenience
