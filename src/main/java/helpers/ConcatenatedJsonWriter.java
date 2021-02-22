@@ -31,10 +31,6 @@ public class ConcatenatedJsonWriter {
          */
         int mtu();
         /**
-         * e.g., io.micrometer tags
-         */
-        String[] tags();
-        /**
          * send message
          */
         ListenableFuture<Void> send(String message);
@@ -61,17 +57,17 @@ public class ConcatenatedJsonWriter {
     /**
      * ctor
      * 
-     * @param topicArn
-     * @throws Exception
+     * @param transport
+     * @param tags
      */
-    public ConcatenatedJsonWriter(Transport transport) {
+    public ConcatenatedJsonWriter(Transport transport, String[] tags) {
         log("ctor");
         
         this.transport = transport;
 
-        requestCounter = Metrics.counter("ConcatenatedJsonWriter.request", transport.tags());
-        successCounter = Metrics.counter("ConcatenatedJsonWriter.success", transport.tags());
-        failureCounter = Metrics.counter("ConcatenatedJsonWriter.failure", transport.tags());
+        requestCounter = Metrics.counter("ConcatenatedJsonWriter.request", tags);
+        successCounter = Metrics.counter("ConcatenatedJsonWriter.success", tags);
+        failureCounter = Metrics.counter("ConcatenatedJsonWriter.failure", tags);
     }
 
     public ListenableFuture<Void> write(JsonElement message) {
@@ -141,7 +137,9 @@ public class ConcatenatedJsonWriter {
     public static void main(String... args) throws Exception {
         Metrics.addRegistry(new SimpleMeterRegistry());
         String topicArn = "arn:aws:sns:us-east-1:343892718819:MyServiceDev-Myservice-TopicBFC7AF6E-QFKBW7OHVXNZ";
-        final ConcatenatedJsonWriter writer = new ConcatenatedJsonWriter(new ConcatenatedJsonWriterTransportAwsTopic(SnsAsyncClient.create(), topicArn));
+        ConcatenatedJsonWriterTransportAwsTopic transport = new ConcatenatedJsonWriterTransportAwsTopic(SnsAsyncClient.create(), topicArn);
+        String[] tags = new String[]{"topicArn", topicArn};
+        final ConcatenatedJsonWriter writer = new ConcatenatedJsonWriter(transport, tags);
         try {
             for (int i = 0; i < 16*250; ++i) {
                 JsonObject jsonObject = new JsonObject();

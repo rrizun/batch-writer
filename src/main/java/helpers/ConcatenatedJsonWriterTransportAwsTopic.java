@@ -34,11 +34,6 @@ public class ConcatenatedJsonWriterTransportAwsTopic implements ConcatenatedJson
     }
 
     @Override
-    public String[] tags() {
-        return new String[] { "topicArn", topicArn };
-    }
-
-    @Override
     public ListenableFuture<Void> send(String message) {
         return new AbstractFuture<Void>() {
             {
