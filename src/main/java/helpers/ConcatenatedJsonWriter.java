@@ -26,7 +26,7 @@ import software.amazon.awssdk.services.sns.SnsAsyncClient;
  * ConcatenatedJsonWriter
  * 
  * <p>pipelined
- * <p>thread-unsafe
+ * <p>not thread-safe
  */
 public class ConcatenatedJsonWriter {
 
@@ -84,7 +84,7 @@ public class ConcatenatedJsonWriter {
      * @return
      * @throws IllegalArgumentException if transport mtu violated
      */
-    public ListenableFuture<Void> write(JsonElement jsonElement) {
+    public ListenableFuture<?> write(JsonElement jsonElement) {
         // log("write", jsonElement);
         requestCounter.increment();
 
@@ -105,17 +105,11 @@ public class ConcatenatedJsonWriter {
      * 
      * @return
      */
-    public ListenableFuture<Void> flush() {
+    public ListenableFuture<?> flush() {
         log("flush");
         if (baos.size() > 0)
             baos = flush(baos, partitions.get(baos));
-        return new FutureRunner2() {
-            {
-                run(() -> {
-                    return Futures.successfulAsList(partitions.values());
-                });
-            }
-        };
+        return Futures.successfulAsList(partitions.values());
     }
 
     // returns new baos
@@ -168,7 +162,7 @@ public class ConcatenatedJsonWriter {
                 byte[] bytes = new byte[new Random().nextInt(256)];
                 new SecureRandom().nextBytes(bytes);
                 jsonObject.addProperty("value", BaseEncoding.base64Url().encode(bytes));
-                ListenableFuture<Void> lf = writer.write(jsonObject);
+                ListenableFuture<?> lf = writer.write(jsonObject);
                 lf.addListener(()->{
                     try {
                         lf.get();

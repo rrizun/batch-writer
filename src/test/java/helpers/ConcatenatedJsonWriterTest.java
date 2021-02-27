@@ -119,12 +119,12 @@ public class ConcatenatedJsonWriterTest {
     }
 
     // convenience
-    private ListenableFuture<Void> write(String json) {
+    private ListenableFuture<?> write(String json) {
         return writer.write(new Gson().fromJson(json, JsonElement.class));
     }
 
     // convenience
-    private ListenableFuture<Void> flush() {
+    private ListenableFuture<?> flush() {
         return writer.flush();
     }
     
