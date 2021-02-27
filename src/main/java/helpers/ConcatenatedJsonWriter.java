@@ -18,7 +18,7 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 
 import io.micrometer.core.instrument.Counter;
-import io.micrometer.core.instrument.Metrics;
+import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import software.amazon.awssdk.services.sns.SnsAsyncClient;
 
@@ -54,10 +54,10 @@ public class ConcatenatedJsonWriter {
 
     private final Transport transport;
 
-    private final Counter in;
-    private final Counter inError;
-    private final Counter out;
-    private final Counter outError;
+    public final Counter in;
+    public final Counter inError;
+    public final Counter out;
+    public final Counter outError;
 
     private ByteArrayOutputStream baos = new ByteArrayOutputStream();
     private final Multimap<ByteArrayOutputStream, VoidFuture> partitions = Multimaps.synchronizedMultimap(LinkedListMultimap.create());
@@ -68,15 +68,15 @@ public class ConcatenatedJsonWriter {
      * @param transport
      * @param tags
      */
-    public ConcatenatedJsonWriter(Transport transport, String[] tags) {
+    public ConcatenatedJsonWriter(Transport transport, MeterRegistry registry, String[] tags) {
         log("ctor");
         
         this.transport = transport;
 
-        in = Metrics.counter("ConcatenatedJsonWriter.in", tags);
-        inError = Metrics.counter("ConcatenatedJsonWriter.inError", tags);
-        out = Metrics.counter("ConcatenatedJsonWriter.out", tags);
-        outError = Metrics.counter("ConcatenatedJsonWriter.outError", tags);
+        in = registry.counter("ConcatenatedJsonWriter.in", tags);
+        inError = registry.counter("ConcatenatedJsonWriter.inError", tags);
+        out = registry.counter("ConcatenatedJsonWriter.out", tags);
+        outError = registry.counter("ConcatenatedJsonWriter.outError", tags);
     }
 
     /**
@@ -84,19 +84,22 @@ public class ConcatenatedJsonWriter {
      * 
      * @param jsonElement
      * @return
-     * @throws IllegalArgumentException if transport mtu violated
      */
     public ListenableFuture<?> write(JsonElement jsonElement) {
         // log("write", jsonElement);
-        byte[] bytes = render(jsonElement);
-        if (bytes.length > transport.mtu())
-            throw new IllegalArgumentException(jsonElement.toString());
-        if (baos.size() + bytes.length > transport.mtu())
-            baos = flush(baos, partitions.get(baos));
-        baos.write(bytes, 0, bytes.length);
-
         VoidFuture lf = new VoidFuture();
-        partitions.put(baos, lf); // track futures on a per-baos/partition basis
+        try {
+            byte[] bytes = render(jsonElement);
+            if (bytes.length > transport.mtu())
+                throw new IllegalArgumentException(jsonElement.toString());
+            if (baos.size() + bytes.length > transport.mtu())
+                baos = flush(baos, partitions.get(baos));
+            baos.write(bytes, 0, bytes.length);
+            partitions.put(baos, lf); // track futures on a per-baos/partition basis
+        } catch (Exception e) {
+            if (lf.setException(e))
+                inError.increment();;
+        }
         return lf;
     }
 
@@ -127,8 +130,8 @@ public class ConcatenatedJsonWriter {
                             in.increment();
                     });
                 }, e -> {
-                    outError.increment();
                     // failure
+                    outError.increment();
                     partition.forEach(lf -> {
                         if (lf.setException(e))
                             inError.increment();
@@ -157,11 +160,10 @@ public class ConcatenatedJsonWriter {
     }
 
     public static void main(String... args) throws Exception {
-        Metrics.addRegistry(new SimpleMeterRegistry());
         String topicArn = "arn:aws:sns:us-east-1:343892718819:MyServiceDev-Myservice-TopicBFC7AF6E-QFKBW7OHVXNZ";
         ConcatenatedJsonWriterTransportAwsTopic transport = new ConcatenatedJsonWriterTransportAwsTopic(SnsAsyncClient.create(), topicArn);
         String[] tags = new String[]{"topicArn", topicArn};
-        final ConcatenatedJsonWriter writer = new ConcatenatedJsonWriter(transport, tags);
+        final ConcatenatedJsonWriter writer = new ConcatenatedJsonWriter(transport, new SimpleMeterRegistry(), tags);
         try {
             for (int i = 0; i < 16*250; ++i) {
                 JsonObject jsonObject = new JsonObject();

@@ -23,7 +23,6 @@ import com.google.gson.JsonStreamParser;
 
 import org.junit.jupiter.api.Test;
 
-import io.micrometer.core.instrument.Metrics;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 
 public class ConcatenatedJsonWriterTest {
@@ -47,7 +46,7 @@ public class ConcatenatedJsonWriterTest {
         }
     };
     
-    private final ConcatenatedJsonWriter writer = new ConcatenatedJsonWriter(transport, new String[]{});
+    private final ConcatenatedJsonWriter writer = new ConcatenatedJsonWriter(transport, new SimpleMeterRegistry(), new String[]{});
 
     @Test
     public void test() throws Exception {
@@ -79,12 +78,11 @@ public class ConcatenatedJsonWriterTest {
     @Test
     public void testCantSendMoreThanMtu() throws Exception {
         String value = Strings.repeat("a", transport.mtu() + 1);
-        IllegalArgumentException e = assertThrows(IllegalArgumentException.class, () -> {
+        assertThrows(Exception.class, () -> {
             Futures.allAsList(write(value), flush()).get();
         });
-        log("assertThrows.expected", e);
         assertEquals(stream(), stream(sendMessages));
-        //###TODO verify counters
+        counts(0, 1);
     }
 
     @Test
@@ -114,6 +112,11 @@ public class ConcatenatedJsonWriterTest {
         Futures.allAsList(write("{}"), flush(), flush()).get();
         assertEquals(stream("{}{}"), stream(sendMessages));
         //###TODO verify counters
+    }
+
+    private void counts(long in, long inErr) {
+        assertEquals(in, writer.in.count());
+        assertEquals(inErr, writer.inError.count());
     }
 
     private String random(int len) {
@@ -154,7 +157,4 @@ public class ConcatenatedJsonWriterTest {
         new LogHelper(this).log(args);
     }
 
-    static {
-        Metrics.addRegistry(new SimpleMeterRegistry());
-    }
 }
