@@ -54,9 +54,10 @@ public class ConcatenatedJsonWriter {
 
     private final Transport transport;
 
-    private final Counter requestCounter;
-    private final Counter successCounter;
-    private final Counter failureCounter;
+    private final Counter in;
+    private final Counter inError;
+    private final Counter out;
+    private final Counter outError;
 
     private ByteArrayOutputStream baos = new ByteArrayOutputStream();
     private final Multimap<ByteArrayOutputStream, VoidFuture> partitions = Multimaps.synchronizedMultimap(LinkedListMultimap.create());
@@ -72,9 +73,10 @@ public class ConcatenatedJsonWriter {
         
         this.transport = transport;
 
-        requestCounter = Metrics.counter("ConcatenatedJsonWriter.request", tags);
-        successCounter = Metrics.counter("ConcatenatedJsonWriter.success", tags);
-        failureCounter = Metrics.counter("ConcatenatedJsonWriter.failure", tags);
+        in = Metrics.counter("ConcatenatedJsonWriter.in", tags);
+        inError = Metrics.counter("ConcatenatedJsonWriter.inError", tags);
+        out = Metrics.counter("ConcatenatedJsonWriter.out", tags);
+        outError = Metrics.counter("ConcatenatedJsonWriter.outError", tags);
     }
 
     /**
@@ -86,9 +88,7 @@ public class ConcatenatedJsonWriter {
      */
     public ListenableFuture<?> write(JsonElement jsonElement) {
         // log("write", jsonElement);
-        requestCounter.increment();
-
-        byte[] bytes = bytes(jsonElement);
+        byte[] bytes = render(jsonElement);
         if (bytes.length > transport.mtu())
             throw new IllegalArgumentException(jsonElement.toString());
         if (baos.size() + bytes.length > transport.mtu())
@@ -121,26 +121,32 @@ public class ConcatenatedJsonWriter {
                     return transport.send(baos.toString());
                 }, sendResponse -> {
                     // success
+                    out.increment();
                     partition.forEach(lf -> {
                         if (lf.setVoid())
-                            successCounter.increment();
+                            in.increment();
                     });
                 }, e -> {
+                    outError.increment();
                     // failure
                     partition.forEach(lf -> {
                         if (lf.setException(e))
-                            failureCounter.increment();
+                            inError.increment();
                     });
                 }, () -> {
                     // finally
-                    log("request", requestCounter.count(), "success", successCounter.count(), "failure", failureCounter.count());
+                    log(String.format("in %s/%s out %s/%s", count(in), count(inError), count(out), count(outError)));
                 });
             }
         };
         return new ByteArrayOutputStream();
     }
 
-    private byte[] bytes(JsonElement jsonElement) {
+    private long count(Counter counter) {
+        return Double.valueOf(counter.count()).longValue();
+    }
+
+    private byte[] render(JsonElement jsonElement) {
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
         new PrintStream(baos, true).println(jsonElement.toString());
         return baos.toByteArray();

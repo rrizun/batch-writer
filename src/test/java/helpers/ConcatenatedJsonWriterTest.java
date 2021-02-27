@@ -2,6 +2,7 @@ package helpers;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+import java.security.SecureRandom;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -11,11 +12,13 @@ import java.util.UUID;
 
 import com.google.common.base.Strings;
 import com.google.common.collect.Lists;
+import com.google.common.io.BaseEncoding;
 import com.google.common.collect.Iterables;
 import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
 import com.google.gson.Gson;
 import com.google.gson.JsonElement;
+import com.google.gson.JsonPrimitive;
 import com.google.gson.JsonStreamParser;
 
 import org.junit.jupiter.api.Test;
@@ -31,7 +34,7 @@ public class ConcatenatedJsonWriterTest {
 
         @Override
         public int mtu() {
-            return 2000;
+            return 256 * 1000;
         }
 
         @Override
@@ -87,13 +90,12 @@ public class ConcatenatedJsonWriterTest {
     @Test
     public void testRandom() throws Exception {
         int count = 0;
-        final int batchCount = random(500);
+        final int batchCount = 1 + new SecureRandom().nextInt(50);
         for (int i = 0; i < batchCount; ++i) {
-            final int perBatch = random(500);
-            for (int j = 0; j < perBatch; ++j)
-                write(UUID.randomUUID().toString());
+            final int perBatch = 1 + new SecureRandom().nextInt(50);
+            for (int j = 0; j < perBatch; ++j, ++count)
+                write(new JsonPrimitive(random(transport.mtu()/2)));
             flush().get();
-            count += perBatch;
         }
         assertEquals(count, Iterables.size(stream(sendMessages)));
         //###TODO verify counters
@@ -114,13 +116,20 @@ public class ConcatenatedJsonWriterTest {
         //###TODO verify counters
     }
 
-    private int random(int bound) {
-        return 1 + new Random().nextInt(bound);
+    private String random(int len) {
+        byte[] bytes = new byte[new SecureRandom().nextInt(len)];
+        new SecureRandom().nextBytes(bytes);
+        return BaseEncoding.base64Url().encode(bytes);
     }
 
     // convenience
     private ListenableFuture<?> write(String json) {
-        return writer.write(new Gson().fromJson(json, JsonElement.class));
+        return write(new Gson().fromJson(json, JsonElement.class));
+    }
+
+    // convenience
+    private ListenableFuture<?> write(JsonElement jsonElement) {
+        return writer.write(jsonElement);
     }
 
     // convenience
