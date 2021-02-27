@@ -6,6 +6,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Consumer;
 
 import com.google.common.base.Defaults;
+import com.google.common.base.Throwables;
 import com.google.common.util.concurrent.AbstractFuture;
 import com.google.common.util.concurrent.AsyncCallable;
 import com.google.common.util.concurrent.ListenableFuture;
@@ -39,7 +40,9 @@ public class FutureRunner2 extends AbstractFuture<Void> {
      * @param response
      */
     protected <T> void run(AsyncCallable<T> request, Consumer<T> response) {
-        run(request, response, e -> { throw new RuntimeException(e); });
+        run(request, response, e -> {
+            log("FutureRunner.catch[1]", Throwables.getRootCause(e));
+        });
     }
 
     /**
@@ -75,15 +78,17 @@ public class FutureRunner2 extends AbstractFuture<Void> {
                         futures.remove(lf);
                         try {
                             response.accept(lf.get()); // throws
-                        } catch (Exception e1) {
+                        } catch (Exception e) {
                             try {
-                                perRequestResponseCatch.accept(e1); // throws
-                            } catch (Exception e2) {
-                                e2.printStackTrace();
+                                perRequestResponseCatch.accept(e); // throws?
+                            } catch (Exception e3a) {
+                                log("FutureRunner.catch[3a]", Throwables.getRootCause(e3a));
                             }
                         } finally {
                             try {
                                 perRequestResponseFinally.run();
+                            } catch (Exception e3b) {
+                                log("FutureRunner.catch[3b]", Throwables.getRootCause(e3b));
                             } finally {
                                 if (running == 0)
                                     set(Defaults.defaultValue(Void.class)); // set futurerunner result
@@ -91,16 +96,18 @@ public class FutureRunner2 extends AbstractFuture<Void> {
                         }
                     }
                 }, MoreExecutors.directExecutor());
-            } catch (Exception e1) {
+            } catch (Exception e) {
                 try {
                     try {
-                        perRequestResponseCatch.accept(e1); // throws
-                    } catch (Exception e2) {
-                        e2.printStackTrace();
+                        perRequestResponseCatch.accept(e); // throws?
+                    } catch (Exception e2a) {
+                        log("FutureRunner.catch[2a]", Throwables.getRootCause(e2a));
                     }
                 } finally {
                     try {
                         perRequestResponseFinally.run();
+                    } catch (Exception e2b) {
+                        log("FutureRunner.catch[2b]", Throwables.getRootCause(e2b));
                     } finally {
                         if (running == 0)
                             set(Defaults.defaultValue(Void.class)); // set futurerunner result
@@ -110,6 +117,11 @@ public class FutureRunner2 extends AbstractFuture<Void> {
         }
     }
 
+    // convenience
+    protected <T> ListenableFuture<T> lf(CompletableFuture<T> cf) {
+        return CompletableFuturesExtra.toListenableFuture(cf);
+    }
+
     @Override
     protected void afterDone() {
         super.afterDone();
@@ -117,9 +129,8 @@ public class FutureRunner2 extends AbstractFuture<Void> {
             futures.forEach(lf -> lf.cancel(true));
     }
 
-    // convenience
-    protected <T> ListenableFuture<T> lf(CompletableFuture<T> cf) {
-        return CompletableFuturesExtra.toListenableFuture(cf);
+    private void log(Object... args) {
+        new LogHelper(this).log(args);
     }
 
 }
