@@ -39,7 +39,7 @@ public class FutureRunner2 extends AbstractFuture<Void> {
      * @param response
      */
     protected <T> void run(AsyncCallable<T> request, Consumer<T> response) {
-        run(request, response, e -> { e.printStackTrace(); });
+        run(request, response, e -> { throw new RuntimeException(e); });
     }
 
     /**
@@ -79,7 +79,7 @@ public class FutureRunner2 extends AbstractFuture<Void> {
                             try {
                                 perRequestResponseCatch.accept(e1); // throws
                             } catch (Exception e2) {
-                                setException(e2); // fail fast
+                                e2.printStackTrace();
                             }
                         } finally {
                             try {
@@ -96,7 +96,7 @@ public class FutureRunner2 extends AbstractFuture<Void> {
                     try {
                         perRequestResponseCatch.accept(e1); // throws
                     } catch (Exception e2) {
-                        setException(e2); // fail fast
+                        e2.printStackTrace();
                     }
                 } finally {
                     try {

@@ -221,7 +221,7 @@ public class DynamoWriter {
                             VoidFuture future = allFutures.remove(writeRequest);
                             if (future!=null) {
                                 successMeter.mark(1);
-                                future.set();
+                                future.setVoid();
                             }
 
                         }

@@ -40,7 +40,7 @@ public class ConcatenatedJsonWriter {
          * 
          * <p>ConcatenatedJsonWriter shall not ask Transport to send a message greater than mtu
          */
-        ListenableFuture<Void> send(String message);
+        ListenableFuture<?> send(String message);
     }
 
     private class VoidFuture extends AbstractFuture<Void> {
