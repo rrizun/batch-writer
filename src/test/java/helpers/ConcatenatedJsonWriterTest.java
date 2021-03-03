@@ -57,7 +57,13 @@ public class ConcatenatedJsonWriterTest {
     private final ConcatenatedJsonWriter writer = new ConcatenatedJsonWriter(transport, registry, new String[]{});
 
     @Test
-    public void test() throws Exception {
+    public void basicSmoke() throws Exception {
+
+        assertThrows(Exception.class, ()->{
+            Futures.allAsList(writer.write(null), writer.flush()).get();
+        });
+        //###TODO verify counters
+
         Futures.allAsList(write("{}"), flush()).get();
         assertEquals(stream("{}"), stream(sendMessages));
         //###TODO verify counters
@@ -66,12 +72,8 @@ public class ConcatenatedJsonWriterTest {
         assertEquals(stream("{}{}"), stream(sendMessages));
         //###TODO verify counters
 
-    }
-
-    @Test
-    public void testb() throws Exception {
         Futures.allAsList(write("{}"), write("{}"), flush()).get();
-        assertEquals(stream("{}{}"), stream(sendMessages));
+        assertEquals(stream("{}{}{}{}"), stream(sendMessages));
         //###TODO verify counters
     }
 
@@ -100,7 +102,7 @@ public class ConcatenatedJsonWriterTest {
         for (int i = 0; i < batchCount; ++i) {
             final int perBatch = 1 + new SecureRandom().nextInt(50);
             for (int j = 0; j < perBatch; ++j, ++count)
-                write(new JsonPrimitive(random(transport.mtu() / 10)));
+                write(String.format("\"%s\"", random(transport.mtu() / 10)));
             flush().get();
         }
         assertEquals(count, Iterables.size(stream(sendMessages)));
@@ -134,13 +136,10 @@ public class ConcatenatedJsonWriterTest {
     }
 
     // convenience
-    private ListenableFuture<?> write(String json) {
-        return write(new Gson().fromJson(json, JsonElement.class));
-    }
-
-    // convenience
-    private ListenableFuture<?> write(JsonElement jsonElement) {
+    private ListenableFuture<?> write(String json) { // not concatenatedJson
+        JsonElement jsonElement = new JsonStreamParser(json).next();
         return writer.write(jsonElement);
+        // return writer.write(new Gson().fromJson(json, JsonElement.class));
     }
 
     // convenience
