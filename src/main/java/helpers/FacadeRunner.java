@@ -14,7 +14,7 @@ import com.spotify.futures.CompletableFuturesExtra;
 /**
  * Opinionated robust facade/runner for listenablefuture(s).
  */
-public class FutureFacade {
+public class FacadeRunner {
     
     private int running;
     private final Object lock = new Object();
@@ -24,7 +24,7 @@ public class FutureFacade {
     /**
      * ctor
      */
-    public FutureFacade() {
+    public FacadeRunner() {
         voidFuture.addListener(()->{
             if (voidFuture.isCancelled())
                 insideFutures.forEach(lf -> lf.cancel(true));

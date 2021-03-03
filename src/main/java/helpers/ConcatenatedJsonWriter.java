@@ -151,7 +151,7 @@ public class ConcatenatedJsonWriter {
 
     // returns new baos
     private ByteArrayOutputStream flush(ByteArrayOutputStream baos, Iterable<VoidFuture> partition) {
-        new FutureFacade() { // front facade not interesting.. inside futures interesting
+        new FacadeRunner() { // front facade not interesting.. inside futures interesting
             {
                 run(() -> {
                     // request
