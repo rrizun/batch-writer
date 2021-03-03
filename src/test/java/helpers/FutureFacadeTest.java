@@ -5,9 +5,9 @@ import com.google.common.util.concurrent.Futures;
 import org.junit.jupiter.api.Test;
 
 /**
- * FutureRunner2Test
+ * FutureFacadeTest
  */
-public class FutureRunner2Test {
+public class FutureFacadeTest {
 
   /**
    * basicSmoke
@@ -16,7 +16,7 @@ public class FutureRunner2Test {
    */
   @Test
   public void basicSmoke() throws Exception {
-    new FutureRunner2() {
+    new FutureFacade() {
       {
         log("init");
         run(() -> {
@@ -34,7 +34,7 @@ public class FutureRunner2Test {
   @Test
   public void test1a() throws Exception {
 
-    new FutureRunner2() {
+    new FutureFacade() {
       {
         log("init");
         run(() -> {
@@ -43,7 +43,7 @@ public class FutureRunner2Test {
       }
     }.get();
 
-    new FutureRunner2() {
+    new FutureFacade() {
       {
         log("init");
         run(() -> {
@@ -54,7 +54,7 @@ public class FutureRunner2Test {
       }
     }.get();
 
-    new FutureRunner2() {
+    new FutureFacade() {
       {
         log("init");
         run(() -> {
@@ -67,7 +67,7 @@ public class FutureRunner2Test {
       }
     }.get();
 
-    new FutureRunner2() {
+    new FutureFacade() {
       {
         log("init");
         run(() -> {
@@ -92,7 +92,7 @@ public class FutureRunner2Test {
   @Test
   public void test1b() throws Exception {
 
-    new FutureRunner2() {
+    new FutureFacade() {
       {
         log("init");
         run(() -> {
@@ -101,7 +101,7 @@ public class FutureRunner2Test {
       }
     }.get();
 
-    new FutureRunner2() {
+    new FutureFacade() {
       {
         log("init");
         run(() -> {
@@ -113,7 +113,7 @@ public class FutureRunner2Test {
       }
     }.get();
 
-    new FutureRunner2() {
+    new FutureFacade() {
       {
         log("init");
         run(() -> {

@@ -5,9 +5,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Consumer;
 
-import com.google.common.base.Defaults;
 import com.google.common.base.Throwables;
-import com.google.common.util.concurrent.AbstractFuture;
 import com.google.common.util.concurrent.AsyncCallable;
 import com.google.common.util.concurrent.ListenableFuture;
 import com.google.common.util.concurrent.MoreExecutors;
@@ -16,11 +14,29 @@ import com.spotify.futures.CompletableFuturesExtra;
 /**
  * Opinionated robust facade/runner for listenablefuture(s).
  */
-public class FutureRunner2 extends AbstractFuture<Void> {
-
+public class FutureFacade {
+    
     private int running;
     private final Object lock = new Object();
-    private final Collection<ListenableFuture<?>> futures = new CopyOnWriteArrayList<>();
+    private final VoidFuture voidFuture = new VoidFuture();
+    private final Collection<ListenableFuture<?>> insideFutures = new CopyOnWriteArrayList<>();
+
+    /**
+     * ctor
+     */
+    public FutureFacade() {
+        voidFuture.addListener(()->{
+            if (voidFuture.isCancelled())
+                insideFutures.forEach(lf -> lf.cancel(true));
+        }, MoreExecutors.directExecutor());
+    }
+
+    /**
+     * get
+     */
+    public ListenableFuture<Void> get() {
+        return voidFuture;
+    }
 
     /**
      * run
@@ -71,11 +87,11 @@ public class FutureRunner2 extends AbstractFuture<Void> {
             try {
                 ListenableFuture<T> lf = request.call(); // throws
                 ++running;
-                futures.add(lf);
+                insideFutures.add(lf);
                 lf.addListener(() -> {
                     synchronized (lock) {
                         --running;
-                        futures.remove(lf);
+                        insideFutures.remove(lf);
                         try {
                             response.accept(lf.get()); // throws
                         } catch (Exception e) {
@@ -91,7 +107,7 @@ public class FutureRunner2 extends AbstractFuture<Void> {
                                 log("FutureRunner.catch[3b]", Throwables.getRootCause(e3b));
                             } finally {
                                 if (running == 0)
-                                    set(Defaults.defaultValue(Void.class)); // set futurerunner result
+                                    voidFuture.setVoid();
                             }
                         }
                     }
@@ -110,7 +126,7 @@ public class FutureRunner2 extends AbstractFuture<Void> {
                         log("FutureRunner.catch[2b]", Throwables.getRootCause(e2b));
                     } finally {
                         if (running == 0)
-                            set(Defaults.defaultValue(Void.class)); // set futurerunner result
+                            voidFuture.setVoid();
                     }
                 }
             }
@@ -120,13 +136,6 @@ public class FutureRunner2 extends AbstractFuture<Void> {
     // convenience
     protected <T> ListenableFuture<T> lf(CompletableFuture<T> cf) {
         return CompletableFuturesExtra.toListenableFuture(cf);
-    }
-
-    @Override
-    protected void afterDone() {
-        super.afterDone();
-        if (isCancelled())
-            futures.forEach(lf -> lf.cancel(true));
     }
 
     private void log(Object... args) {
