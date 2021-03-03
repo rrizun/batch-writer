@@ -14,6 +14,7 @@ import com.google.common.base.Strings;
 import com.google.common.collect.Lists;
 import com.google.common.io.BaseEncoding;
 import com.google.common.collect.Iterables;
+import com.google.common.collect.Iterators;
 import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
 import com.google.gson.Gson;
@@ -23,9 +24,16 @@ import com.google.gson.JsonStreamParser;
 
 import org.junit.jupiter.api.Test;
 
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Metrics;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 
 public class ConcatenatedJsonWriterTest {
+
+    private MeterRegistry registry = new SimpleMeterRegistry();
+    {
+        Metrics.addRegistry(registry);
+    }
 
     private final List<String> sendMessages = new ArrayList<>();
 
@@ -46,7 +54,7 @@ public class ConcatenatedJsonWriterTest {
         }
     };
     
-    private final ConcatenatedJsonWriter writer = new ConcatenatedJsonWriter(transport, new SimpleMeterRegistry(), new String[]{});
+    private final ConcatenatedJsonWriter writer = new ConcatenatedJsonWriter(transport, registry, new String[]{});
 
     @Test
     public void test() throws Exception {
@@ -92,7 +100,7 @@ public class ConcatenatedJsonWriterTest {
         for (int i = 0; i < batchCount; ++i) {
             final int perBatch = 1 + new SecureRandom().nextInt(50);
             for (int j = 0; j < perBatch; ++j, ++count)
-                write(new JsonPrimitive(random(transport.mtu()/2)));
+                write(new JsonPrimitive(random(transport.mtu() / 10)));
             flush().get();
         }
         assertEquals(count, Iterables.size(stream(sendMessages)));
@@ -148,8 +156,10 @@ public class ConcatenatedJsonWriterTest {
     // convenience
     private Iterable<JsonElement> stream(Iterable<String> concatenatedJson) {
         List<JsonElement> stream = new ArrayList<>();
-        for (String s : concatenatedJson)
-            stream.addAll(Lists.newArrayList(new JsonStreamParser(s)));
+        for (String s : concatenatedJson) {
+            Iterators.addAll(stream, new JsonStreamParser(s));
+            // stream.addAll(Lists.newArrayList(new JsonStreamParser(s)));
+        }
         return stream;
     }
 
