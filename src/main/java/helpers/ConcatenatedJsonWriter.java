@@ -60,9 +60,9 @@ public class ConcatenatedJsonWriter {
     private final Transport transport;
 
     public final Counter in;
-    public final Counter inError;
+    public final Counter inErr;
     public final Counter out;
-    public final Counter outError;
+    public final Counter outErr;
 
     private ByteArrayOutputStream baos = new ByteArrayOutputStream();
     private final Multimap<ByteArrayOutputStream, VoidFuture> partitions = Multimaps.synchronizedMultimap(LinkedListMultimap.create());
@@ -78,24 +78,19 @@ public class ConcatenatedJsonWriter {
 
         this.transport = transport;
 
-        //###TODO UGLY
-        //###TODO UGLY
-        //###TODO UGLY
-        in = registry.counter(WriteRecord.class.getName(), "success", "true");
-        //###TODO UGLY
-        //###TODO UGLY
-        //###TODO UGLY
-        inError = registry.counter(WriteRecord.class.getName(), "success", "false");
-        //###TODO UGLY
-        //###TODO UGLY
-        //###TODO UGLY
-        out = registry.counter("ConcatenatedJsonWriter.out", tags);
-        outError = registry.counter("ConcatenatedJsonWriter.outError", tags);
+        in = registry.counter("ConcatenatedJsonWriter.in", "success", "true");
+        inErr = registry.counter("ConcatenatedJsonWriter.inErr", "success", "false");
+        out = registry.counter("ConcatenatedJsonWriter.out", "success", "true");
+        outErr = registry.counter("ConcatenatedJsonWriter.outErr", "success", "false");
     }
 
-
-    private class WriteRecord {
+    class WriteRecord {
+        public boolean success;
+        public String failureMessage;
         public String firstThree;
+        public String toString() {
+            return SplunkHelper.toString(this);
+        }
     }
 
     /**
@@ -105,28 +100,45 @@ public class ConcatenatedJsonWriter {
      * @return
      */
     public ListenableFuture<?> write(JsonElement jsonElement) {
-        return RecordRunner.record(new WriteRecord()).run(record->{
-            if (jsonElement.toString().length()>3)
-                record.firstThree = jsonElement.toString().substring(0, 3);
+        return new FacadeRunner() {
+            WriteRecord record = new WriteRecord();
+            {
+                run(() -> {
+                    // for fun
+                    if (jsonElement.toString().length() > 3)
+                        record.firstThree = jsonElement.toString().substring(0, 3);
 
-            byte[] bytes = render(jsonElement);
-            if (bytes.length > transport.mtu())
-                throw new IllegalArgumentException("jsonElement more than mtu");
-            if (baos.size() + bytes.length > transport.mtu())
-                baos = flush(baos, partitions.get(baos));
-            baos.write(bytes, 0, bytes.length);
+                    byte[] bytes = render(jsonElement);
+                    if (bytes.length > transport.mtu())
+                        throw new IllegalArgumentException("jsonElement more than mtu");
+                    if (baos.size() + bytes.length > transport.mtu())
+                        baos = flush(baos, partitions.get(baos));
+                    baos.write(bytes, 0, bytes.length);
 
-            VoidFuture lf = new VoidFuture();
-            partitions.put(baos, lf); // track futures on a per-baos/partition basis
-            return lf;
-        });
+                    VoidFuture lf = new VoidFuture();
+                    partitions.put(baos, lf); // track futures on a per-baos/partition basis
+                    return lf;
+                }, result->{
+                    in.increment();
+                    record.success = true;
+                }, e->{
+                    inErr.increment();
+                    record.failureMessage = e.toString();
+                }, ()->{
+                    log(record);
+                });
+            }
+        }.one();
     }
 
-    private class FlushRecord {
+    class FlushRecord {
         long in;
         long inErr;
         long out;
         long outErr;
+        public String toString() {
+            return SplunkHelper.toString(this);
+        }
     }
 
     /**
@@ -135,22 +147,29 @@ public class ConcatenatedJsonWriter {
      * @return
      */
     public ListenableFuture<?> flush() {
-        return RecordRunner.record(new FlushRecord()).run(record->{
-            if (baos.size() > 0)
-                baos = flush(baos, partitions.get(baos));
-            return Futures.whenAllComplete(partitions.values()).run(()->{
-                record.in = count(in);
-                record.inErr = count(inError);
-                record.out = count(out);
-                record.outErr = count(outError);
-                // return Futures.immediateVoidFuture();    
-            }, MoreExecutors.directExecutor());
-            // return Futures.successfulAsList(partitions.values());
-        });
+        return new FacadeRunner() {
+            FlushRecord record = new FlushRecord();
+            {
+                run(() -> {
+                    if (baos.size() > 0)
+                        baos = flush(baos, partitions.get(baos));
+                    return Futures.successfulAsList(partitions.values());
+                }, () -> {
+                    record.in = count(in);
+                    record.inErr = count(inErr);
+                    record.out = count(out);
+                    record.outErr = count(outErr);
+                    log(record);
+                });
+            }
+        }.one();
     }
 
     // returns new baos
     private ByteArrayOutputStream flush(ByteArrayOutputStream baos, Iterable<VoidFuture> partition) {
+        //###TODO really a fire-forget? e.g., what if want to cancel??
+        //###TODO really a fire-forget? e.g., what if want to cancel??
+        //###TODO really a fire-forget? e.g., what if want to cancel??
         new FacadeRunner() { // front facade not interesting.. inside futures interesting
             {
                 run(() -> {
@@ -162,7 +181,7 @@ public class ConcatenatedJsonWriter {
                     partition.forEach(lf -> lf.setVoid());
                 }, e -> {
                     // failure
-                    outError.increment();
+                    outErr.increment();
                     partition.forEach(lf -> lf.setException(e));
                 }, () -> {
                     // finally

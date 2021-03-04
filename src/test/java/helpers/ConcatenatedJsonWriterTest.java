@@ -59,9 +59,10 @@ public class ConcatenatedJsonWriterTest {
     @Test
     public void basicSmoke() throws Exception {
 
-        assertThrows(Exception.class, ()->{
+        Exception e = assertThrows(Exception.class, ()->{
             Futures.allAsList(writer.write(null), writer.flush()).get();
         });
+        log("expected", e);
         //###TODO verify counters
 
         Futures.allAsList(write("{}"), flush()).get();
@@ -126,7 +127,7 @@ public class ConcatenatedJsonWriterTest {
 
     private void counts(long in, long inErr) {
         assertEquals(in, writer.in.count());
-        assertEquals(inErr, writer.inError.count());
+        assertEquals(inErr, writer.inErr.count());
     }
 
     private String random(int len) {
@@ -137,9 +138,7 @@ public class ConcatenatedJsonWriterTest {
 
     // convenience
     private ListenableFuture<?> write(String json) { // not concatenatedJson
-        JsonElement jsonElement = new JsonStreamParser(json).next();
-        return writer.write(jsonElement);
-        // return writer.write(new Gson().fromJson(json, JsonElement.class));
+        return writer.write(new JsonStreamParser(json).next());
     }
 
     // convenience

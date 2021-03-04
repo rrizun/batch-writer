@@ -1,12 +1,13 @@
 package helpers;
 
-import java.util.Collection;
+import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Consumer;
 
 import com.google.common.base.Throwables;
 import com.google.common.util.concurrent.AsyncCallable;
+import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
 import com.google.common.util.concurrent.MoreExecutors;
 import com.spotify.futures.CompletableFuturesExtra;
@@ -19,7 +20,7 @@ public class FacadeRunner {
     private int running;
     private final Object lock = new Object();
     private final VoidFuture voidFuture = new VoidFuture();
-    private final Collection<ListenableFuture<?>> insideFutures = new CopyOnWriteArrayList<>();
+    private final List<ListenableFuture<?>> insideFutures = new CopyOnWriteArrayList<>();
 
     /**
      * ctor
@@ -31,11 +32,12 @@ public class FacadeRunner {
         }, MoreExecutors.directExecutor());
     }
 
-    /**
-     * get
-     */
-    public ListenableFuture<Void> get() {
+    public ListenableFuture<?> all() {
         return voidFuture;
+    }
+
+    public ListenableFuture<?> one() {
+        return insideFutures.iterator().next();
     }
 
     /**
@@ -59,6 +61,19 @@ public class FacadeRunner {
         run(request, response, e -> {
             log("FutureRunner.catch[1]", Throwables.getRootCause(e));
         });
+    }
+
+    /**
+     * run
+     * 
+     * @param <T>
+     * @param request
+     * @param perRequestResponseFinally
+     */
+    protected <T> void run(AsyncCallable<T> request, Runnable perRequestResponseFinally) {
+        run(request, response -> {}, e->{
+            log("FutureRunner.catch[1]", Throwables.getRootCause(e));
+        }, perRequestResponseFinally);
     }
 
     /**
@@ -91,18 +106,18 @@ public class FacadeRunner {
                 lf.addListener(() -> {
                     synchronized (lock) {
                         --running;
-                        insideFutures.remove(lf);
+                        // insideFutures.remove(lf);
                         try {
                             response.accept(lf.get()); // throws
                         } catch (Exception e) {
                             try {
-                                perRequestResponseCatch.accept(e); // throws?
+                                perRequestResponseCatch.accept(e); // throws
                             } catch (Exception e3a) {
                                 log("FutureRunner.catch[3a]", Throwables.getRootCause(e3a));
                             }
                         } finally {
                             try {
-                                perRequestResponseFinally.run();
+                                perRequestResponseFinally.run(); // throws
                             } catch (Exception e3b) {
                                 log("FutureRunner.catch[3b]", Throwables.getRootCause(e3b));
                             } finally {
@@ -113,15 +128,16 @@ public class FacadeRunner {
                     }
                 }, MoreExecutors.directExecutor());
             } catch (Exception e) {
+                insideFutures.add(Futures.immediateFailedFuture(e));
                 try {
                     try {
-                        perRequestResponseCatch.accept(e); // throws?
+                        perRequestResponseCatch.accept(e); // throws
                     } catch (Exception e2a) {
                         log("FutureRunner.catch[2a]", Throwables.getRootCause(e2a));
                     }
                 } finally {
                     try {
-                        perRequestResponseFinally.run();
+                        perRequestResponseFinally.run(); // throws
                     } catch (Exception e2b) {
                         log("FutureRunner.catch[2b]", Throwables.getRootCause(e2b));
                     } finally {

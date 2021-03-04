@@ -11,7 +11,7 @@ public class RecordRunner<R> {
     public boolean success;
     public String failureMessage;
     public final R record;
-    public static <R> RecordRunner<R> record(R record) {
+    private <R> RecordRunner<R> record(R record) {
         return new RecordRunner<R>(record);
     }
     private RecordRunner(R record) {
@@ -32,7 +32,7 @@ public class RecordRunner<R> {
                     failureMessage = ""+e;
                     Metrics.counter(record.getClass().getName(), "success", "false").increment();
                 } finally {
-                    log(SplunkHelper.render(this));
+                    log(SplunkHelper.toString(this));
                 }
             }, MoreExecutors.directExecutor());
             return lf;
@@ -42,7 +42,7 @@ public class RecordRunner<R> {
             try {
                 return Futures.immediateFailedFuture(e);
             } finally {
-                log(SplunkHelper.render(this));
+                log(SplunkHelper.toString(this));
             }
         }
     }

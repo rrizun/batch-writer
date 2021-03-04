@@ -18,12 +18,18 @@ public class FacadeRunnerTest {
   public void basicSmoke() throws Exception {
     new FacadeRunner() {
       {
-        log("init");
         run(() -> {
           return Futures.immediateVoidFuture();
         });
       }
-    }.get();
+    }.all().get();
+    new FacadeRunner() {
+      {
+        run(() -> {
+          return Futures.immediateVoidFuture();
+        });
+      }
+    }.one().get();
   }
 
   /**
@@ -41,7 +47,7 @@ public class FacadeRunnerTest {
           throw new Exception("fromRun");
         });
       }
-    }.get();
+    }.all().get();
 
     new FacadeRunner() {
       {
@@ -52,7 +58,7 @@ public class FacadeRunnerTest {
           throw new RuntimeException("fromResult");
         });
       }
-    }.get();
+    }.all().get();
 
     new FacadeRunner() {
       {
@@ -65,7 +71,7 @@ public class FacadeRunnerTest {
           throw new RuntimeException("fromCatch");
         });
       }
-    }.get();
+    }.all().get();
 
     new FacadeRunner() {
       {
@@ -80,7 +86,7 @@ public class FacadeRunnerTest {
           throw new RuntimeException("fromFinally");
         });
       }
-    }.get();
+    }.all().get();
 
   }
 
@@ -99,7 +105,7 @@ public class FacadeRunnerTest {
           return Futures.immediateFailedFuture(new Exception("fromRun"));
         });
       }
-    }.get();
+    }.all().get();
 
     new FacadeRunner() {
       {
@@ -111,7 +117,7 @@ public class FacadeRunnerTest {
           throw new RuntimeException("fromCatch");
         });
       }
-    }.get();
+    }.all().get();
 
     new FacadeRunner() {
       {
@@ -125,8 +131,42 @@ public class FacadeRunnerTest {
           throw new RuntimeException("fromFinally");
         });
       }
-    }.get();
+    }.all().get();
 
+  }
+
+  class MyAuditRecord {
+    public boolean success;
+    public String failureMessage;
+    public Number result;
+    public String toString() {
+      return SplunkHelper.toString(this);
+    }
+  }
+
+  @Test
+  public void testAuditRecord() throws Exception {
+    new FacadeRunner() {
+      {
+        MyAuditRecord record = new MyAuditRecord();
+        run(() -> {
+          return Futures.immediateFuture(1.0 / 0);
+          // return Futures.immediateFuture(new Supplier<Number>(){
+          // @Override
+          // public Number get() {
+          // return 1.0/0;
+          // }
+          // });
+        }, result -> {
+          record.result = result;
+          record.success = true;
+        }, e -> {
+          record.failureMessage = e.toString();
+        }, () -> {
+          log(record);
+        });
+      }
+    }.all().get();
   }
 
   private void log(Object... args) {
