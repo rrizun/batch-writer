@@ -19,21 +19,21 @@ public class FutureRunner {
     
     private int running;
     private final Object lock = new Object();
-    private final VoidFuture voidFuture = new VoidFuture();
+    private final VoidFuture frontFacade = new VoidFuture();
     private final List<ListenableFuture<?>> insideFutures = new CopyOnWriteArrayList<>();
 
     /**
      * ctor
      */
     public FutureRunner() {
-        voidFuture.addListener(()->{
-            if (voidFuture.isCancelled())
+        frontFacade.addListener(()->{
+            if (frontFacade.isCancelled())
                 insideFutures.forEach(lf -> lf.cancel(true));
         }, MoreExecutors.directExecutor());
     }
 
     public ListenableFuture<?> all() {
-        return voidFuture; // always success
+        return frontFacade; // always success
     }
 
     // useful for safely running a single future
@@ -124,7 +124,7 @@ public class FutureRunner {
                                 log("FutureRunner.catch[3b]", Throwables.getRootCause(e3b));
                             } finally {
                                 if (running == 0)
-                                    voidFuture.setVoid();
+                                    frontFacade.setVoid();
                             }
                         }
                     }
@@ -144,7 +144,7 @@ public class FutureRunner {
                         log("FutureRunner.catch[2b]", Throwables.getRootCause(e2b));
                     } finally {
                         if (running == 0)
-                            voidFuture.setVoid();
+                            frontFacade.setVoid();
                     }
                 }
             }
