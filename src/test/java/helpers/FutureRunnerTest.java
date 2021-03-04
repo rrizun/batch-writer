@@ -5,9 +5,9 @@ import com.google.common.util.concurrent.Futures;
 import org.junit.jupiter.api.Test;
 
 /**
- * FacadeRunnerTest
+ * FutureRunnerTest
  */
-public class FacadeRunnerTest {
+public class FutureRunnerTest {
 
   /**
    * basicSmoke
@@ -16,14 +16,14 @@ public class FacadeRunnerTest {
    */
   @Test
   public void basicSmoke() throws Exception {
-    new FacadeRunner() {
+    new FutureRunner() {
       {
         run(() -> {
           return Futures.immediateVoidFuture();
         });
       }
     }.all().get();
-    new FacadeRunner() {
+    new FutureRunner() {
       {
         run(() -> {
           return Futures.immediateVoidFuture();
@@ -40,7 +40,7 @@ public class FacadeRunnerTest {
   @Test
   public void test1a() throws Exception {
 
-    new FacadeRunner() {
+    new FutureRunner() {
       {
         log("init");
         run(() -> {
@@ -49,7 +49,7 @@ public class FacadeRunnerTest {
       }
     }.all().get();
 
-    new FacadeRunner() {
+    new FutureRunner() {
       {
         log("init");
         run(() -> {
@@ -60,7 +60,7 @@ public class FacadeRunnerTest {
       }
     }.all().get();
 
-    new FacadeRunner() {
+    new FutureRunner() {
       {
         log("init");
         run(() -> {
@@ -73,7 +73,7 @@ public class FacadeRunnerTest {
       }
     }.all().get();
 
-    new FacadeRunner() {
+    new FutureRunner() {
       {
         log("init");
         run(() -> {
@@ -98,7 +98,7 @@ public class FacadeRunnerTest {
   @Test
   public void test1b() throws Exception {
 
-    new FacadeRunner() {
+    new FutureRunner() {
       {
         log("init");
         run(() -> {
@@ -107,7 +107,7 @@ public class FacadeRunnerTest {
       }
     }.all().get();
 
-    new FacadeRunner() {
+    new FutureRunner() {
       {
         log("init");
         run(() -> {
@@ -119,7 +119,7 @@ public class FacadeRunnerTest {
       }
     }.all().get();
 
-    new FacadeRunner() {
+    new FutureRunner() {
       {
         log("init");
         run(() -> {
@@ -146,7 +146,7 @@ public class FacadeRunnerTest {
 
   @Test
   public void testAuditRecord() throws Exception {
-    new FacadeRunner() {
+    new FutureRunner() {
       {
         MyAuditRecord record = new MyAuditRecord();
         run(() -> {

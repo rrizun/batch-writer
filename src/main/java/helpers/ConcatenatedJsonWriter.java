@@ -100,7 +100,7 @@ public class ConcatenatedJsonWriter {
      * @return
      */
     public ListenableFuture<?> write(JsonElement jsonElement) {
-        return new FacadeRunner() {
+        return new FutureRunner() {
             WriteRecord record = new WriteRecord();
             {
                 run(() -> {
@@ -147,7 +147,7 @@ public class ConcatenatedJsonWriter {
      * @return
      */
     public ListenableFuture<?> flush() {
-        return new FacadeRunner() {
+        return new FutureRunner() {
             FlushRecord record = new FlushRecord();
             {
                 run(() -> {
@@ -170,7 +170,7 @@ public class ConcatenatedJsonWriter {
         //###TODO really a fire-forget? e.g., what if want to cancel??
         //###TODO really a fire-forget? e.g., what if want to cancel??
         //###TODO really a fire-forget? e.g., what if want to cancel??
-        new FacadeRunner() { // front facade not interesting.. inside futures interesting
+        new FutureRunner() { // front facade not interesting.. inside futures interesting
             {
                 run(() -> {
                     // request
