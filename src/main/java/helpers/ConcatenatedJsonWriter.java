@@ -3,7 +3,6 @@ package helpers;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.security.SecureRandom;
-import java.util.Random;
 
 import com.google.common.base.Defaults;
 import com.google.common.collect.LinkedListMultimap;
@@ -11,16 +10,14 @@ import com.google.common.collect.Multimap;
 import com.google.common.collect.Multimaps;
 import com.google.common.io.BaseEncoding;
 import com.google.common.util.concurrent.AbstractFuture;
-import com.google.common.util.concurrent.AsyncFunction;
 import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
 import com.google.common.util.concurrent.MoreExecutors;
 import com.google.gson.JsonElement;
-import com.google.gson.JsonObject;
+import com.google.gson.JsonPrimitive;
 
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
-import io.micrometer.core.instrument.Metrics;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import software.amazon.awssdk.services.sns.SnsAsyncClient;
 
@@ -105,8 +102,9 @@ public class ConcatenatedJsonWriter {
             {
                 run(() -> {
                     // for fun
+                    String s = jsonElement.toString();
                     if (jsonElement.toString().length() > 3)
-                        record.firstThree = jsonElement.toString().substring(0, 3);
+                        record.firstThree = s.substring(0, Math.min(s.length(), 20));
 
                     byte[] bytes = render(jsonElement);
                     if (bytes.length > transport.mtu())
@@ -202,7 +200,7 @@ public class ConcatenatedJsonWriter {
         return baos.toByteArray();
     }
 
-    private void log(Object... args) {
+    private static void log(Object... args) {
         new LogHelper(ConcatenatedJsonWriter.class).log(args);
     }
 
@@ -212,16 +210,15 @@ public class ConcatenatedJsonWriter {
         final ConcatenatedJsonWriter writer = new ConcatenatedJsonWriter(transport, new SimpleMeterRegistry());
         try {
             for (int i = 0; i < 16*250; ++i) {
-                JsonObject jsonObject = new JsonObject();
-                byte[] bytes = new byte[new Random().nextInt(256)];
+                byte[] bytes = new byte[new SecureRandom().nextInt(256)];
                 new SecureRandom().nextBytes(bytes);
-                jsonObject.addProperty("value", BaseEncoding.base64Url().encode(bytes));
-                ListenableFuture<?> lf = writer.write(jsonObject);
+                String value = BaseEncoding.base64().encode(bytes);
+                ListenableFuture<?> lf = writer.write(new JsonPrimitive(value));
                 lf.addListener(()->{
                     try {
                         lf.get();
                     } catch (Exception e) {
-                        // log(e);
+                        log(e);
                     }
                 }, MoreExecutors.directExecutor());
             }
