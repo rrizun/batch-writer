@@ -22,7 +22,7 @@ public class FutureRunnerTest {
           return Futures.immediateVoidFuture();
         });
       }
-    }.all().get();
+    }.get().get();
     new FutureRunner() {
       {
         run(() -> {
@@ -47,7 +47,7 @@ public class FutureRunnerTest {
           throw new Exception("fromRun");
         });
       }
-    }.all().get();
+    }.get().get();
 
     new FutureRunner() {
       {
@@ -58,7 +58,7 @@ public class FutureRunnerTest {
           throw new RuntimeException("fromResult");
         });
       }
-    }.all().get();
+    }.get().get();
 
     new FutureRunner() {
       {
@@ -71,7 +71,7 @@ public class FutureRunnerTest {
           throw new RuntimeException("fromCatch");
         });
       }
-    }.all().get();
+    }.get().get();
 
     new FutureRunner() {
       {
@@ -86,7 +86,7 @@ public class FutureRunnerTest {
           throw new RuntimeException("fromFinally");
         });
       }
-    }.all().get();
+    }.get().get();
 
   }
 
@@ -105,7 +105,7 @@ public class FutureRunnerTest {
           return Futures.immediateFailedFuture(new Exception("fromRun"));
         });
       }
-    }.all().get();
+    }.get().get();
 
     new FutureRunner() {
       {
@@ -117,7 +117,7 @@ public class FutureRunnerTest {
           throw new RuntimeException("fromCatch");
         });
       }
-    }.all().get();
+    }.get().get();
 
     new FutureRunner() {
       {
@@ -131,7 +131,7 @@ public class FutureRunnerTest {
           throw new RuntimeException("fromFinally");
         });
       }
-    }.all().get();
+    }.get().get();
 
   }
 
@@ -166,7 +166,7 @@ public class FutureRunnerTest {
           log(record);
         });
       }
-    }.all().get();
+    }.get().get();
   }
 
   private void log(Object... args) {

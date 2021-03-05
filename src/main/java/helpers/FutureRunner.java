@@ -32,7 +32,7 @@ public class FutureRunner {
         }, MoreExecutors.directExecutor());
     }
 
-    public ListenableFuture<?> all() {
+    public ListenableFuture<?> get() {
         return frontFacade; // always success
     }
 
