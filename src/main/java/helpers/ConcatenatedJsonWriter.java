@@ -73,7 +73,7 @@ public class ConcatenatedJsonWriter {
      * @param transport
      * @param tags
      */
-    public ConcatenatedJsonWriter(Transport transport, MeterRegistry registry, String[] tags) {
+    public ConcatenatedJsonWriter(Transport transport, MeterRegistry registry) {
         log("ctor");
 
         this.transport = transport;
@@ -209,8 +209,7 @@ public class ConcatenatedJsonWriter {
     public static void main(String... args) throws Exception {
         String topicArn = "arn:aws:sns:us-east-1:343892718819:MyServiceDev-Myservice-TopicBFC7AF6E-QFKBW7OHVXNZ";
         ConcatenatedJsonWriterTransportAwsTopic transport = new ConcatenatedJsonWriterTransportAwsTopic(SnsAsyncClient.create(), topicArn);
-        String[] tags = new String[]{"topicArn", topicArn};
-        final ConcatenatedJsonWriter writer = new ConcatenatedJsonWriter(transport, new SimpleMeterRegistry(), tags);
+        final ConcatenatedJsonWriter writer = new ConcatenatedJsonWriter(transport, new SimpleMeterRegistry());
         try {
             for (int i = 0; i < 16*250; ++i) {
                 JsonObject jsonObject = new JsonObject();

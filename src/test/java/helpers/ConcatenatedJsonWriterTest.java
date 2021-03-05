@@ -54,7 +54,7 @@ public class ConcatenatedJsonWriterTest {
         }
     };
     
-    private final ConcatenatedJsonWriter writer = new ConcatenatedJsonWriter(transport, registry, new String[]{});
+    private final ConcatenatedJsonWriter writer = new ConcatenatedJsonWriter(transport, registry);
 
     @Test
     public void basicSmoke() throws Exception {
