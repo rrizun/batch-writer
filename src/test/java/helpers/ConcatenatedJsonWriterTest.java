@@ -11,6 +11,7 @@ import java.util.Random;
 import java.util.UUID;
 
 import com.google.common.base.Strings;
+import com.google.common.base.Throwables;
 import com.google.common.collect.Lists;
 import com.google.common.io.BaseEncoding;
 import com.google.common.collect.Iterables;
@@ -61,21 +62,22 @@ public class ConcatenatedJsonWriterTest {
     @Test
     public void basicSmoke() throws Exception {
 
+        // can't write null
         Exception e = assertThrows(Exception.class, ()->{
-            Futures.allAsList(writer.write(null), writer.flush()).get();
+            all(writer.write(null), writer.flush());
         });
-        log("expected", e);
+        log("assertThrows", Throwables.getRootCause(e));
         //###TODO verify counters
 
-        Futures.allAsList(write("{}"), flush()).get();
+        all(write("{}"), flush());
         assertEquals(stream("{}"), stream(sendMessages));
         //###TODO verify counters
 
-        Futures.allAsList(write("{}"), flush()).get();
+        all(write("{}"), flush());
         assertEquals(stream("{}{}"), stream(sendMessages));
         //###TODO verify counters
 
-        Futures.allAsList(write("{}"), write("{}"), flush()).get();
+        all(write("{}"), write("{}"), flush());
         assertEquals(stream("{}{}{}{}"), stream(sendMessages));
         //###TODO verify counters
     }
@@ -83,7 +85,7 @@ public class ConcatenatedJsonWriterTest {
     @Test
     public void testCanSendLessThanMtu() throws Exception {
         String value = Strings.repeat("a", transport.mtu() / 2);
-        Futures.allAsList(write(value), flush()).get();
+        all(write(value), flush());
         assertEquals(stream(value), stream(sendMessages));
         //###TODO verify counters
     }
@@ -91,9 +93,10 @@ public class ConcatenatedJsonWriterTest {
     @Test
     public void testCantSendMoreThanMtu() throws Exception {
         String value = Strings.repeat("a", transport.mtu() + 1);
-        assertThrows(Exception.class, () -> {
-            Futures.allAsList(write(value), flush()).get();
+        Exception e = assertThrows(Exception.class, () -> {
+            all(write(value), flush());
         });
+        log("assertThrows", Throwables.getRootCause(e));
         assertEquals(stream(), stream(sendMessages));
         counts(0, 1);
     }
@@ -118,11 +121,11 @@ public class ConcatenatedJsonWriterTest {
         assertEquals(stream(), stream(sendMessages));
         //###TODO verify counters
 
-        Futures.allAsList(write("{}"), flush(), flush()).get();
+        all(write("{}"), flush(), flush());
         assertEquals(stream("{}"), stream(sendMessages));
         //###TODO verify counters
 
-        Futures.allAsList(write("{}"), flush(), flush()).get();
+        all(write("{}"), flush(), flush());
         assertEquals(stream("{}{}"), stream(sendMessages));
         //###TODO verify counters
     }
@@ -135,7 +138,7 @@ public class ConcatenatedJsonWriterTest {
     private String random(int len) {
         byte[] bytes = new byte[new SecureRandom().nextInt(len)];
         new SecureRandom().nextBytes(bytes);
-        return BaseEncoding.base64Url().encode(bytes);
+        return BaseEncoding.base64().encode(bytes);
     }
 
     // convenience
@@ -148,6 +151,11 @@ public class ConcatenatedJsonWriterTest {
         return writer.flush();
     }
     
+    // convenience
+    private void all(ListenableFuture<?>... futures) throws Exception {
+        Futures.allAsList(futures).get();
+    }
+
     // convenience
     private Iterable<JsonElement> stream(String... concatenatedJson) {
         return stream(Arrays.asList(concatenatedJson));

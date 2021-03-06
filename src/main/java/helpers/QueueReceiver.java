@@ -1,210 +1,169 @@
 package helpers;
 
+import java.time.Duration;
+import java.util.List;
+import java.util.Random;
 import java.util.concurrent.*;
+import java.util.function.Function;
 
+import com.google.common.collect.Lists;
 import com.google.common.util.concurrent.*;
-import com.google.gson.*;
-import com.spotify.futures.*;
 
 import software.amazon.awssdk.services.sqs.*;
 import software.amazon.awssdk.services.sqs.model.*;
 
-class AwsNotification {
-	public String Type;
-	public String MessageId;
-	public String TopicArn;
-	public String Timestamp;
-	public String Message;
+    // class AwsNotification {
+    // 	public String Type;
+    // 	public String MessageId;
+    // 	public String TopicArn;
+    // 	public String Timestamp;
+    // 	public String Message;
 
-	public String toString() {
-		return new Gson().toJson(this);
-	}
-}
+    // 	public String toString() {
+    // 		return new Gson().toJson(this);
+    // 	}
+    // }
 
+// At-most-once aws sqs message receiver
 public class QueueReceiver {
 
-
-  public static void main(String... args) throws Exception {
-    int cores = Runtime.getRuntime().availableProcessors();
-    final String queueUrl = "https://us-east-2.queue.amazonaws.com/743203956339/DlcmStack-DlcmInputQueue159006CA-ZYW850D9C4E";
-    // final ExecutorService executor = Executors.newCachedThreadPool();
-    for (int core = 0; core < cores; ++core) {
-      new Thread() {
-        public void run() {
-
-          try {
-
-            final QueueReceiver queueReceiver = new QueueReceiver(queueUrl);
-            try {
-              queueReceiver.start();
-              Thread.sleep(Long.MAX_VALUE);
-            } finally {
-              queueReceiver.close();
-            }
-          } catch (Exception e) {
-
-          }
-
-        }
-      }.start();
-    }
-  }
-
   private final String queueUrl;
-
   private final SqsAsyncClient sqsClient = SqsAsyncClient.create();
 
-  private final long periodSeconds = 5;
-  private final LocalMeter receiveMeter = new LocalMeter();
-  private final LocalMeter successMeter = new LocalMeter();
-  private final LocalMeter failureMeter = new LocalMeter();
-
   private boolean running;
+  private Function<String, ListenableFuture<?>> listener;
+
+  private final List<ListenableFuture<?>> futures = Lists.newCopyOnWriteArrayList();
+
+
+  private final ScheduledExecutorService executorService = Executors.newSingleThreadScheduledExecutor(new ThreadFactoryBuilder().setDaemon(true).build()); // for backoff
 
   /**
    * ctor
    * 
-   * @throws Exception
+   * @param queueUrl
    */
-  public QueueReceiver(String queueUrl) throws Exception {
-    log("ctor");
+  public QueueReceiver(String queueUrl) {
+    log("ctor", queueUrl);
     this.queueUrl = queueUrl;
   }
 
+  /**
+   * setListener
+   * 
+   * @param listener
+   */
+  public void setListener(Function<String, ListenableFuture<?>> listener) {
+    this.listener = listener;
+  }
+
+  /**
+   * start
+   */
   public void start() {
-    log("start");
-    synchronized(lock) {
-      running = true;
-      doReceiveMessage(0);
+    log("start", queueUrl);
+    running = true;
+    doReceiveMessage(0);
+  }
+
+  /**
+   * close
+   */
+  public void close() {
+    log("close", queueUrl);
+    running = false;
+    // executorService.shutdownNow();
+    // futures.forEach(f->f.cancel(true));
+  }
+
+  class MessageConsumedRecord {
+    public final String queueUrl;
+    public boolean success;
+    public String failureMessage;
+    public final String body;
+    public MessageConsumedRecord(String queueUrl, String body) {
+      this.queueUrl = queueUrl;
+      this.body = body;
+    }
+    public String toString() {
+      return SplunkHelper.toString(this);
     }
   }
 
-  private int busy;
-  private final Object lock = new Object();
-
-  public void close() throws Exception {
-    log("close");
-    synchronized (lock) {
-      // signal
-      running = false;
-
-      // wait
-      while (busy > 0)
-        lock.wait();
-
-        // close
-      sqsClient.close();
-    }
-  }
-
-  // must be locked
   private void doReceiveMessage(int i) {
-    trace("doReceiveMessage", running, i);
     if (running) {
-
-      // ----------------------------------------------------------------------
-      // receiveMessage
-      // ----------------------------------------------------------------------
-
-      ReceiveMessageRequest receiveMessageRequest = ReceiveMessageRequest.builder()
-      //
-      .queueUrl(queueUrl)
-      // The maximum long polling wait time is 20 seconds
-      .waitTimeSeconds(20)
-      //
-      .build();
-
-      trace(receiveMessageRequest);
-
-      ListenableFuture<ReceiveMessageResponse> listenableFuture = lf(sqsClient.receiveMessage(receiveMessageRequest));
-      // stats(i);
-      ++busy;
-      listenableFuture.addListener(()->{
-        synchronized (lock) {
-          try {
-            ReceiveMessageResponse receiveMessageResponse = listenableFuture.get();
-  
-            trace(abbrev(receiveMessageResponse.toString()));
-  
-            if (receiveMessageResponse.hasMessages()) {
-              for (Message message : receiveMessageResponse.messages()) {
-  
-                AwsNotification notification = new Gson().fromJson(message.body(), AwsNotification.class);
-                JsonArray jsonArray = new Gson().fromJson(notification.Message, JsonArray.class);
-  
-                trace("receiveMessage", abbrev(jsonArray.toString()));
-  
-                receiveMeter.mark(jsonArray.size());
-                stats(i);
-  
-                // ----------------------------------------------------------------------
-                // deleteMessage
-                // ----------------------------------------------------------------------
-        
+      ListenableFuture<?> lf = new FutureRunner(){{
+        run(() -> {
+          ReceiveMessageRequest receiveMessageRequest = ReceiveMessageRequest.builder()
+              //
+              .queueUrl(queueUrl)
+              //
+              .waitTimeSeconds(20)
+              //
+              .build();
+          return lf(sqsClient.receiveMessage(receiveMessageRequest));
+        }, receiveMessageResponse->{
+          if (receiveMessageResponse.hasMessages()) {
+            for (Message message : receiveMessageResponse.messages()) {
+              String body = message.body();
+              run(() -> {
                 DeleteMessageRequest deleteMessageRequest = DeleteMessageRequest.builder()
                     //
-                    .queueUrl(queueUrl)
-                    //
-                    .receiptHandle(message.receiptHandle())
-                    //
-                    .build();
-  
-                trace(deleteMessageRequest);
-  
-                ListenableFuture<DeleteMessageResponse> deleteMessageResponseFuture = lf(sqsClient.deleteMessage(deleteMessageRequest));
-                ++busy;
-                deleteMessageResponseFuture.addListener(()->{
-                  synchronized (lock) {
-                    try {
-                      DeleteMessageResponse deleteMessageResponse = deleteMessageResponseFuture.get();
-                      trace(deleteMessageResponse);
-                      successMeter.mark(jsonArray.size());
-                      stats(i);
-                    } catch (Exception e) {
-                      log(e);
-                      failureMeter.mark(jsonArray.size());
-                      stats(i);
-                    } finally {
-                      --busy;
-                      lock.notifyAll();
-                    }
-                  }
-                }, MoreExecutors.directExecutor());
-              }
+                    .queueUrl(queueUrl).receiptHandle(message.receiptHandle()).build();
+                return lf(sqsClient.deleteMessage(deleteMessageRequest));
+              }, deleteMessageResponse -> {
+                MessageConsumedRecord record = new MessageConsumedRecord(queueUrl, body);
+                run(()->{
+                  return listener.apply(body);
+                }, result->{
+                  record.success=true;
+                }, e->{ // listener
+                  record.failureMessage = ""+e;
+                }, ()->{
+                  log(record);
+                });
+              }, e->{ // deleteMessage
+                log(e);
+              });
             }
-        
-          } catch (Exception e) {
-            log(e); //###TODO SET A FUTURE HERE???
-          } finally {
-            --busy;
-            lock.notifyAll();
-            doReceiveMessage(i);
           }
-        }
+        }, e->{ // receiveMessage
+          log(e);
+          run(()->{
+            // backoff
+            return Futures.scheduleAsync(()->Futures.immediateVoidFuture(), Duration.ofSeconds(25), executorService);
+          });
+        });
+      }}.get();
+
+      futures.add(lf);
+      lf.addListener(()->{
+        futures.remove(lf);
+        doReceiveMessage(i);
       }, MoreExecutors.directExecutor());
     }
-  }
-
-  private void stats(int i) {
-    log("receive", receiveMeter, "success", successMeter, "failure", failureMeter);
-  }
-
-  private <T> ListenableFuture<T> lf(CompletableFuture<T> cf) {
-    return CompletableFuturesExtra.toListenableFuture(cf);
-  }
-
-  private String abbrev(String s) {
-    if (s.length()>1024)
-      s = s.substring(0,1024)+"...";
-    return s;
   }
 
   private void log(Object... args) {
     new LogHelper(this).log(args);
   }
 
-  private void trace(Object... args) {
-    // new LogHelper(this).log(args);
+  public static void main(String... args) throws Exception {
+    String queueUrl = "https://sqs.us-east-1.amazonaws.com/343892718819/asdf";
+    final QueueReceiver queueReceiver = new QueueReceiver(queueUrl);
+    queueReceiver.setListener(body->{
+      // System.out.println(body);
+      if (new Random().nextInt(2)==0)
+        return Futures.immediateFailedFuture(new Exception("Oof!"));
+      return Futures.immediateVoidFuture();
+    });
+    queueReceiver.start();
+    try {
+      Thread.sleep(Long.MAX_VALUE);
+    } finally {
+      queueReceiver.close();
+    }
+    System.out.println("done");
   }
 
 }

@@ -1,6 +1,10 @@
 package helpers;
 
+import static org.junit.jupiter.api.Assertions.*;
+
+import com.google.common.base.Throwables;
 import com.google.common.util.concurrent.Futures;
+import com.google.common.util.concurrent.ListenableFuture;
 
 import org.junit.jupiter.api.Test;
 
@@ -16,6 +20,7 @@ public class FutureRunnerTest {
    */
   @Test
   public void basicSmoke() throws Exception {
+    
     new FutureRunner() {
       {
         run(() -> {
@@ -23,13 +28,56 @@ public class FutureRunnerTest {
         });
       }
     }.get().get();
-    new FutureRunner() {
-      {
-        run(() -> {
-          return Futures.immediateVoidFuture();
-        });
-      }
-    }.one().get();
+    
+    assertThrows(Exception.class, ()->{
+      new FutureRunner() {
+        {
+          run(() -> {
+            throw new Exception("Oof!");
+          });
+        }
+      }.get().get();
+    });
+
+    assertThrows(Exception.class, ()->{
+      new FutureRunner() {
+        {
+          run(() -> {
+            return Futures.immediateFailedFuture(new Exception("Oof!"));
+          });
+        }
+      }.get().get();
+    });
+    
+  }
+
+  @Test
+  public void adversarial() {
+    Exception e;
+
+    e = assertThrows(Exception.class, ()->{
+      new FutureRunner() {
+        {
+          run(() -> {
+            return Futures.immediateFailedFuture(new Exception("[1]"));
+          });
+        }
+      }.get().get();
+    });
+    log(e);
+    assertEquals("[1]", Throwables.getRootCause(e).getMessage());
+
+    e = assertThrows(Exception.class, ()->{
+      new FutureRunner() {
+        {
+          run(() -> {
+            return Futures.immediateFailedFuture(new Exception("[1]"));
+          });
+        }
+      }.get().get();
+    });
+    log(e);
+    assertEquals("[1]", Throwables.getRootCause(e).getMessage());
   }
 
   /**
@@ -171,6 +219,28 @@ public class FutureRunnerTest {
 
   private void log(Object... args) {
     new LogHelper(this).log(args);
+  }
+
+  public static void main(String... args) throws Exception {
+    try {
+      ListenableFuture<?> lf = new FutureRunner(){{
+        run(()->{
+          throw new Exception("Oof!");
+          // return Futures.immediateVoidFuture();
+        }, result->{
+          System.out.println(" [result] "+result);
+        }, e->{
+          System.out.println(" [handled] "+e);
+          throw new RuntimeException(e);
+        });
+      }}.get();
+      System.out.println(" [1] "+lf);
+      System.out.println(" [2] "+lf.get());
+    } catch (Exception e) {
+      System.out.println(" [3] "+e);
+    } finally {
+      System.out.println("done");
+    }
   }
 
 }

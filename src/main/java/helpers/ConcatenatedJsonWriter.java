@@ -4,6 +4,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.security.SecureRandom;
 
+import com.google.common.base.Ascii;
 import com.google.common.base.Defaults;
 import com.google.common.collect.LinkedListMultimap;
 import com.google.common.collect.Multimap;
@@ -84,7 +85,7 @@ public class ConcatenatedJsonWriter {
     class WriteRecord {
         public boolean success;
         public String failureMessage;
-        public String firstThree;
+        public String value;
         public String toString() {
             return SplunkHelper.toString(this);
         }
@@ -102,9 +103,7 @@ public class ConcatenatedJsonWriter {
             {
                 run(() -> {
                     // for fun
-                    String s = jsonElement.toString();
-                    if (jsonElement.toString().length() > 3)
-                        record.firstThree = s.substring(0, Math.min(s.length(), 20));
+                    record.value = Ascii.truncate(jsonElement.toString(), 20, "...");
 
                     byte[] bytes = render(jsonElement);
                     if (bytes.length > transport.mtu())
@@ -122,11 +121,12 @@ public class ConcatenatedJsonWriter {
                 }, e->{
                     inErr.increment();
                     record.failureMessage = e.toString();
+                    throw new RuntimeException(e); // propagate to caller
                 }, ()->{
                     log(record);
                 });
             }
-        }.one();
+        }.get();
     }
 
     class FlushRecord {
@@ -160,7 +160,7 @@ public class ConcatenatedJsonWriter {
                     log(record);
                 });
             }
-        }.one();
+        }.get();
     }
 
     // returns new baos
