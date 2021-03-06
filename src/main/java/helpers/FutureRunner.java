@@ -28,11 +28,13 @@ public class FutureRunner {
     public FutureRunner() {
         frontFacade.addListener(()->{
             if (frontFacade.isCancelled())
-                insideFutures.forEach(lf -> lf.cancel(true));
+                insideFutures.forEach(insideFuture -> insideFuture.cancel(true));
         }, MoreExecutors.directExecutor());
     }
 
     public ListenableFuture<?> get() {
+        if (running == 0)
+            frontFacade.setVoid();
         return frontFacade; // always success
     }
 
