@@ -30,6 +30,8 @@ import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 
 public class ConcatenatedJsonWriterTest {
 
+    final int MTU = 256 * 1024; // sns/sqs
+
     private MeterRegistry registry = new SimpleMeterRegistry();
     {
         Metrics.addRegistry(registry);
@@ -41,14 +43,14 @@ public class ConcatenatedJsonWriterTest {
 
         @Override
         public int mtu() {
-            return 256 * 1000;
+            return MTU;
         }
 
         @Override
         public ListenableFuture<?> send(String message) {
             // log("send", message);
             if (message.length() > mtu())
-                throw new RuntimeException(String.format("message.len=%s mtu=%s", message.length(), mtu()));
+                fail();
             sendMessages.add(message);
             return Futures.immediateVoidFuture();
         }
