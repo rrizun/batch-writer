@@ -105,13 +105,13 @@ public class QueueReceiver {
         }, receiveMessageResponse->{
           if (receiveMessageResponse.hasMessages()) {
             for (Message message : receiveMessageResponse.messages()) {
-              String body = message.body();
               run(() -> {
                 DeleteMessageRequest deleteMessageRequest = DeleteMessageRequest.builder()
                     //
                     .queueUrl(queueUrl).receiptHandle(message.receiptHandle()).build();
                 return lf(sqsClient.deleteMessage(deleteMessageRequest));
               }, deleteMessageResponse -> {
+                String body = message.body();
                 MessageConsumedRecord record = new MessageConsumedRecord(queueUrl, body);
                 run(()->{
                   return listener.apply(body);
