@@ -33,6 +33,7 @@ implementation 'io.micrometer:micrometer-core:latest.release'
 
     testImplementation 'org.junit.jupiter:junit-jupiter-api:+'
     testImplementation 'org.junit.jupiter:junit-jupiter-engine:+'
+	testImplementation("org.assertj:assertj-core:+")
 
 
 }
