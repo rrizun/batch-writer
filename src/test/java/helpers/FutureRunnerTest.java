@@ -1,8 +1,8 @@
 package helpers;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.assertj.core.api.Assertions.*;
+// import static org.junit.jupiter.api.Assertions.*;
 
-import com.google.common.base.Throwables;
 import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
 
@@ -20,166 +20,131 @@ public class FutureRunnerTest {
    */
   @Test
   public void basicSmoke() throws Exception {
+
+    new FutureRunner();
+
+    new FutureRunner(){};
+
+    new FutureRunner(){{}};
+
+    new FutureRunner(){{}}.get();
+
+    new FutureRunner(){{}}.get().get();
     
-    new FutureRunner() {
+    // future runner is a facade for zero or more internal futures
+    assertThat(new FutureRunner() {
       {
         run(() -> {
-          return Futures.immediateVoidFuture();
+          return Futures.immediateFuture("hello");
         });
       }
-    }.get().get();
-    
-    assertThrows(Exception.class, ()->{
+    }.get().get()).isNull();
+
+    assertThatThrownBy(() -> {
       new FutureRunner() {
         {
           run(() -> {
-            throw new Exception("Oof!");
+            throw new Exception("Oof[1]");
           });
         }
       }.get().get();
-    });
+    }).hasMessageContaining("Oof[1]");
 
-    assertThrows(Exception.class, ()->{
+    assertThatThrownBy(() -> {
       new FutureRunner() {
         {
           run(() -> {
-            return Futures.immediateFailedFuture(new Exception("Oof!"));
+            return Futures.immediateFailedFuture(new Exception("Oof[2]"));
           });
         }
       }.get().get();
-    });
-    
-  }
+    }).hasMessageContaining("Oof[2]");
 
-  @Test
-  public void adversarial() {
-    Exception e;
-
-    e = assertThrows(Exception.class, ()->{
+    // if more that one thrown exception then return the first thrown exception
+    assertThatThrownBy(() -> {
       new FutureRunner() {
         {
           run(() -> {
-            return Futures.immediateFailedFuture(new Exception("[1]"));
+            return Futures.immediateFailedFuture(new Exception("first"));
           });
-        }
-      }.get().get();
-    });
-    log(e);
-    assertEquals("[1]", Throwables.getRootCause(e).getMessage());
-
-    e = assertThrows(Exception.class, ()->{
-      new FutureRunner() {
-        {
           run(() -> {
-            return Futures.immediateFailedFuture(new Exception("[1]"));
+            return Futures.immediateFailedFuture(new Exception("second"));
           });
         }
       }.get().get();
-    });
-    log(e);
-    assertEquals("[1]", Throwables.getRootCause(e).getMessage());
-  }
-
-  /**
-   * test1a
-   * 
-   * @throws Exception
-   */
-  @Test
-  public void test1a() throws Exception {
-
-    new FutureRunner() {
-      {
-        log("init");
-        run(() -> {
-          throw new Exception("fromRun");
-        });
-      }
-    }.get().get();
-
-    new FutureRunner() {
-      {
-        log("init");
-        run(() -> {
-          return Futures.immediateVoidFuture();
-        }, result -> {
-          throw new RuntimeException("fromResult");
-        });
-      }
-    }.get().get();
-
-    new FutureRunner() {
-      {
-        log("init");
-        run(() -> {
-          return Futures.immediateVoidFuture();
-        }, result -> {
-          throw new RuntimeException("fromResult");
-        }, e -> {
-          throw new RuntimeException("fromCatch");
-        });
-      }
-    }.get().get();
-
-    new FutureRunner() {
-      {
-        log("init");
-        run(() -> {
-          return Futures.immediateVoidFuture();
-        }, result -> {
-          throw new RuntimeException("fromResult");
-        }, e -> {
-          throw new RuntimeException("fromCatch");
-        }, ()->{
-          throw new RuntimeException("fromFinally");
-        });
-      }
-    }.get().get();
+    }).hasMessageContaining("first").hasMessageNotContaining("second");
 
   }
 
   /**
-   * test1b
+   * adversarial
    * 
    * @throws Exception
    */
   @Test
-  public void test1b() throws Exception {
+  public void adversarial() throws Exception {
 
-    new FutureRunner() {
-      {
-        log("init");
-        run(() -> {
-          return Futures.immediateFailedFuture(new Exception("fromRun"));
-        });
-      }
-    }.get().get();
+    assertThatThrownBy(() -> {
+      new FutureRunner() {
+        {
+          run(() -> {
+            throw new Exception("fromRun"); // first
+          });
+        }
+      }.get().get();
+    }).hasMessageContaining("fromRun");
 
-    new FutureRunner() {
-      {
-        log("init");
-        run(() -> {
-          return Futures.immediateFailedFuture(new Exception("fromRun"));
-        }, result -> {
-        }, e -> {
-          throw new RuntimeException("fromCatch");
-        });
-      }
-    }.get().get();
+    assertThatThrownBy(() -> {
+      new FutureRunner() {
+        {
+          run(() -> {
+            return Futures.immediateFailedFuture(new Exception("fromRun")); // first
+          });
+        }
+      }.get().get();
+    }).hasMessageContaining("fromRun");
 
-    new FutureRunner() {
-      {
-        log("init");
-        run(() -> {
-          return Futures.immediateFailedFuture(new Exception("fromRun"));
-        }, result -> {
-        }, e -> {
-          throw new RuntimeException("fromCatch");
-        }, ()->{
-          throw new RuntimeException("fromFinally");
-        });
-      }
-    }.get().get();
+    assertThatThrownBy(() -> {
+      new FutureRunner() {
+        {
+          run(() -> {
+            return Futures.immediateFuture("hello");
+          }, result -> {
+            throw new RuntimeException("fromResult"); // first
+          });
+        }
+      }.get().get();
+    }).hasMessageContaining("fromResult");
+
+    assertThatThrownBy(() -> {
+      new FutureRunner() {
+        {
+          run(() -> {
+            return Futures.immediateVoidFuture();
+          }, result -> {
+            throw new RuntimeException("fromResult");
+          }, e -> {
+            throw new RuntimeException("fromCatch", e); // first
+          });
+        }
+      }.get().get();
+    }).hasMessageContaining("fromCatch");
+
+    assertThatThrownBy(() -> {
+      new FutureRunner() {
+        {
+          run(() -> {
+            return Futures.immediateVoidFuture();
+          }, result -> {
+            throw new RuntimeException("fromResult");
+          }, e -> {
+            throw new RuntimeException("fromCatch", e); // first
+          }, ()->{
+            throw new RuntimeException("fromFinally"); // second
+          });
+        }
+      }.get().get();
+    }).hasMessageContaining("fromCatch");
 
   }
 
