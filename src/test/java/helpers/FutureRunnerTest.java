@@ -29,9 +29,11 @@ public class FutureRunnerTest {
 
     new FutureRunner(){{}}.get();
 
-    new FutureRunner(){{}}.get().get();
+    assertThat(new FutureRunner(){{}}.get().get()).isNull();
     
-    // future runner is a facade for zero or more internal futures
+    // future runner is a facade for zero or more futures
+    // the front of the facade is ListenableFuture<Void>
+    // behind the facade is zero or more futures
     assertThat(new FutureRunner() {
       {
         run(() -> {
@@ -108,7 +110,7 @@ public class FutureRunnerTest {
       new FutureRunner() {
         {
           run(() -> {
-            return Futures.immediateFuture("hello");
+            return Futures.immediateVoidFuture();
           }, result -> {
             throw new RuntimeException("fromResult"); // first
           });
@@ -148,7 +150,7 @@ public class FutureRunnerTest {
 
   }
 
-  class MyAuditRecord {
+  class MyAuditEventLogRecord {
     public boolean success;
     public String failureMessage;
     public Number result;
@@ -159,27 +161,23 @@ public class FutureRunnerTest {
 
   @Test
   public void testAuditRecord() throws Exception {
-    new FutureRunner() {
-      {
-        MyAuditRecord record = new MyAuditRecord();
-        run(() -> {
-          return Futures.immediateFuture(1.0 / 0);
-          // return Futures.immediateFuture(new Supplier<Number>(){
-          // @Override
-          // public Number get() {
-          // return 1.0/0;
-          // }
-          // });
-        }, result -> {
-          record.result = result;
-          record.success = true;
-        }, e -> {
-          record.failureMessage = e.toString();
-        }, () -> {
-          log(record);
-        });
-      }
-    }.get().get();
+    assertThatCode(()->{
+      new FutureRunner() {
+        {
+          MyAuditEventLogRecord work = new MyAuditEventLogRecord();
+          run(() -> {
+            return Futures.immediateFuture(1.0 / 0); // double NaN
+          }, result -> {
+            work.result = result;
+            work.success = true;
+          }, e -> {
+            work.failureMessage = e.toString();
+          }, () -> {
+            log(work);
+          });
+        }
+      }.get().get();
+    }).doesNotThrowAnyException();
   }
 
   private void log(Object... args) {
@@ -188,21 +186,30 @@ public class FutureRunnerTest {
 
   public static void main(String... args) throws Exception {
     try {
-      ListenableFuture<?> lf = new FutureRunner(){{
-        run(()->{
-          throw new Exception("Oof!");
-          // return Futures.immediateVoidFuture();
-        }, result->{
-          System.out.println(" [result] "+result);
-        }, e->{
-          System.out.println(" [handled] "+e);
-          throw new RuntimeException(e);
-        });
-      }}.get();
-      System.out.println(" [1] "+lf);
-      System.out.println(" [2] "+lf.get());
+      ListenableFuture<?> lf = new FutureRunner() {
+        {
+          run(() -> {
+            // throw new Exception("Oof!");
+            // return Futures.immediateFuture("hello");
+            return Futures.immediateFailedFuture(new Exception("Oof!"));
+          }, result -> {
+            System.out.println(" [result] " + result);
+            }, e->{
+            System.out.println(" [handled] "+e);
+            // throw new RuntimeException(e);
+          });
+        }
+
+        @Override
+        protected void onFinally() {
+          System.out.println("onFinally!");
+        }
+
+      }.get();
+      System.out.println(" [1] " + lf);
+      System.out.println(" [2] " + lf.get());
     } catch (Exception e) {
-      System.out.println(" [3] "+e);
+      System.out.println(" [3] " + e);
     } finally {
       System.out.println("done");
     }
