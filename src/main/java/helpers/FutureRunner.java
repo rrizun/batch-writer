@@ -16,7 +16,7 @@ import com.spotify.futures.CompletableFuturesExtra;
  */
 public class FutureRunner {
     
-    private int running;
+    private int running; // aka inFlight
     private final Object lock = new Object();
     private final VoidFuture facade = new VoidFuture();
     private final List<ListenableFuture<?>> insideFutures = new CopyOnWriteArrayList<>();
@@ -33,8 +33,10 @@ public class FutureRunner {
     }
 
     public ListenableFuture<?> get() {
-        doFinally(); // safety
-        return facade;
+        synchronized (lock) {
+            doFinally(); // safety
+            return facade;
+        }
     }
 
     /**
@@ -105,13 +107,13 @@ public class FutureRunner {
                             try {
                                 perRequestResponseCatch.accept(e); // throws
                             } catch (Exception e1) {
-                                setException(e1);
+                                doException(e1);
                             }
                         } finally {
                             try {
                                 perRequestResponseFinally.run(); // throws
                             } catch (Exception e2) {
-                                setException(e2);
+                                doException(e2);
                             } finally {
                                 doFinally();
                             }
@@ -124,13 +126,13 @@ public class FutureRunner {
                     try {
                         perRequestResponseCatch.accept(e); // throws
                     } catch (Exception e1) {
-                        setException(e1);
+                        doException(e1);
                     }
                 } finally {
                     try {
                         perRequestResponseFinally.run(); // throws
                     } catch (Exception e2) {
-                        setException(e2);
+                        doException(e2);
                     } finally {
                         doFinally();
                     }
@@ -139,23 +141,37 @@ public class FutureRunner {
         }
     }
 
-    private void setException(Exception e) {
+    // convenience
+    protected void onFinally() {
+        // do nothing
+    }
+
+    // convenience
+    protected <T> ListenableFuture<T> lf(CompletableFuture<T> cf) {
+        return CompletableFuturesExtra.toListenableFuture(cf);
+    }
+
+    // ----------------------------------------------------------------------
+
+    private void doException(Exception e) {
         if (firstException == null)
             firstException = e;
     }
 
     private void doFinally() {
         if (running == 0) {
-            if (firstException == null)
-                facade.setVoid();
-            else
-                facade.setException(firstException);
+            --running; // once
+            try {
+                onFinally();
+            } catch (Exception e) {
+                doException(e);
+            } finally {
+                if (firstException == null)
+                    facade.setVoid();
+                else
+                    facade.setException(firstException);
+            }
         }
-    }
-
-    // convenience
-    protected <T> ListenableFuture<T> lf(CompletableFuture<T> cf) {
-        return CompletableFuturesExtra.toListenableFuture(cf);
     }
 
     private void log(Object... args) {
