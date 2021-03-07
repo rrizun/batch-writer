@@ -5,6 +5,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Consumer;
 
+import com.google.common.util.concurrent.AbstractFuture;
 import com.google.common.util.concurrent.AsyncCallable;
 import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
@@ -16,6 +17,15 @@ import com.spotify.futures.CompletableFuturesExtra;
  */
 public class FutureRunner {
     
+    private class VoidFuture extends AbstractFuture<Void> {
+        public boolean setVoid() {
+            return super.set(null);
+        }
+        public boolean setException(Throwable throwable) {
+            return super.setException(throwable);
+        }
+    }
+      
     private int running; // aka inFlight
     private final Object lock = new Object();
     private final VoidFuture facade = new VoidFuture();
